@@ -2,7 +2,7 @@
 // ══════════════════════════════════════════════════════════════
 // Content Dashboard v5
 // + Heute Tab
-// + 3-stufiger Status (Geplant → Gefilmt → Gepostet)
+// + 3-stufiger Status (Planned → Filmed → Gepostet)
 // + Serien-Planung mit Deadlines & Ampel
 // Franz & The Green Collective
 // ══════════════════════════════════════════════════════════════
@@ -49,7 +49,7 @@ const uid = () => Math.random().toString(36).slice(2, 8);
 
 // ── Status helpers ────────────────────────────────────────────
 const STATUS_FLOW   = ["planned", "filmed", "posted"];
-const STATUS_LABEL  = { planned:"Geplant", filmed:"Gefilmt", posted:"Gepostet" };
+const STATUS_LABEL  = { planned:"Planned", filmed:"Filmed", posted:"Posted" };
 const STATUS_COLOR  = { planned:MUTED, filmed:AMBER, posted:GREEN };
 const STATUS_BG     = { planned:"transparent", filmed:"#FEF3C7", posted:"#F0F7F3" };
 const nextStatus    = (s) => { const i = STATUS_FLOW.indexOf(s); return i < 2 ? STATUS_FLOW[i+1] : STATUS_FLOW[i]; };
@@ -70,10 +70,10 @@ const deadlineColor = (days) => {
   return GREEN;
 };
 const deadlineLabel = (days) => {
-  if (days < 0)  return `${Math.abs(days)}d überfällig`;
-  if (days === 0) return "Heute";
-  if (days === 1) return "Morgen";
-  return `in ${days} Tagen`;
+  if (days < 0)  return `${Math.abs(days)}d overdue`;
+  if (days === 0) return "Today";
+  if (days === 1) return "Tomorrow";
+  return `in ${days} days`;
 };
 
 // ══════════════════════════════════════════════════════════════
@@ -192,7 +192,7 @@ function Modal({ title, onClose, onSave, saving, children, wide }) {
 // ══════════════════════════════════════════════════════════════
 // HEUTE TAB
 // ══════════════════════════════════════════════════════════════
-function HeuteTab({ reels, stories, series, onToggleStatus, onOpenReel, saving }) {
+function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, saving }) {
   const m = useIsMobile();
   const todayStr = new Date().toISOString().split("T")[0];
 
@@ -208,25 +208,25 @@ function HeuteTab({ reels, stories, series, onToggleStatus, onOpenReel, saving }
     <div>
       {/* Header */}
       <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14, padding:m?14:20, marginBottom:14, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-        <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:4 }}>HEUTE</div>
+        <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:4 }}>TODAY</div>
         <div style={{ fontSize:m?20:26, fontWeight:700, color:TEXT }}>
-          {new Date().toLocaleDateString("de-DE", { weekday:"long", day:"numeric", month:"long" })}
+          {new Date().toLocaleDateString("en-GB", { weekday:"long", day:"numeric", month:"long" })}
         </div>
         {allDone && (
           <div style={{ marginTop:10, padding:"8px 14px", background:`${GREEN}11`, border:`1px solid ${GREEN}33`, borderRadius:8, display:"inline-flex", alignItems:"center", gap:8 }}>
             <span style={{ fontSize:16 }}>✅</span>
-            <span style={{ fontSize:12, color:GREEN, fontFamily:"monospace", fontWeight:700 }}>Alles gepostet heute!</span>
+            <span style={{ fontSize:12, color:GREEN, fontFamily:"monospace", fontWeight:700 }}>Everything posted today!</span>
           </div>
         )}
         {todayReels.length === 0 && (
-          <div style={{ marginTop:10, fontSize:13, color:MUTED, fontFamily:"monospace" }}>Kein Content geplant für heute.</div>
+          <div style={{ marginTop:10, fontSize:13, color:MUTED, fontFamily:"monospace" }}>No content planned for today.</div>
         )}
       </div>
 
       {/* Heute Reels */}
       {todayReels.length > 0 && (
         <div style={{ marginBottom:14 }}>
-          <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:8 }}>HEUTE ZU POSTEN</div>
+          <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:8 }}>TO POST TODAY</div>
           {todayReels.map(reel => {
             const color = bc(reel.brand);
             const sObj  = reel.type==="SERIES" ? series.find(s=>s.id===reel.series_id) : null;
@@ -247,7 +247,7 @@ function HeuteTab({ reels, stories, series, onToggleStatus, onOpenReel, saving }
                 {/* Hook — prominent */}
                 {reel.hook && (
                   <div style={{ padding:"10px 14px", background:`${color}08`, border:`1px solid ${color}22`, borderRadius:8, marginBottom:8 }}>
-                    <div style={{ fontSize:9, color, fontFamily:"monospace", letterSpacing:"1.5px", marginBottom:3 }}>HOOK — ERSTE 2 SEKUNDEN</div>
+                    <div style={{ fontSize:9, color, fontFamily:"monospace", letterSpacing:"1.5px", marginBottom:3 }}>HOOK — FIRST 2 SECONDS</div>
                     <div style={{ fontSize:14, color:TEXT, fontStyle:"italic" }}>"{reel.hook}"</div>
                   </div>
                 )}
@@ -259,7 +259,7 @@ function HeuteTab({ reels, stories, series, onToggleStatus, onOpenReel, saving }
 
                 {/* Details button */}
                 <button onClick={() => onOpenReel(reel, reel.brand)} style={{ padding:"6px 14px", borderRadius:6, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:10, fontFamily:"monospace", cursor:"pointer" }}>
-                  DETAILS ANZEIGEN →
+                  VIEW DETAILS →
                 </button>
               </div>
             );
@@ -270,13 +270,13 @@ function HeuteTab({ reels, stories, series, onToggleStatus, onOpenReel, saving }
       {/* Heute Stories */}
       {todayStories.length > 0 && (
         <div style={{ marginBottom:14 }}>
-          <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:8 }}>STORIES HEUTE</div>
+          <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:8 }}>STORIES TODAY</div>
           {todayStories.map(story => {
             const color = bc(story.brand);
             const slots = [
-              { key:"morning", label:"Morgen", value:story.morning, status:story.morning_status },
-              { key:"midday",  label:"Mittag", value:story.midday,  status:story.midday_status  },
-              { key:"evening", label:"Abend",  value:story.evening, status:story.evening_status },
+              { key:"morning", label:"Morning", value:story.morning, status:story.morning_status },
+              { key:"midday",  label:"Midday", value:story.midday,  status:story.midday_status  },
+              { key:"evening", label:"Evening",  value:story.evening, status:story.evening_status },
             ];
             return (
               <div key={story.id} style={{ background:CARD, border:`1px solid ${BORDER}`, borderLeft:`4px solid ${color}`, borderRadius:12, padding:m?12:16, marginBottom:10 }}>
@@ -357,7 +357,7 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving }) {
                 <div style={{ fontSize:9, color:s.color, fontFamily:"monospace", letterSpacing:"2px", marginBottom:3, fontWeight:700 }}>{s.brand.toUpperCase()}</div>
                 <div style={{ fontSize:m?15:18, fontWeight:700, color:TEXT }}>{s.name}</div>
                 <div style={{ fontSize:11, color:MUTED, fontFamily:"monospace", marginTop:3 }}>
-                  {posted} gepostet · {filmed} gefilmt · {planned} geplant · {s.parts} total
+                  {posted} posted · {filmed} filmed · {planned} planned · {s.parts} total
                 </div>
               </div>
               {/* Ampel */}
@@ -408,14 +408,14 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving }) {
                     <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                       <div style={{ width:8, height:8, borderRadius:"50%", background:dColor, flexShrink:0 }}/>
                       <span style={{ fontSize:10, color:dColor, fontFamily:"monospace", fontWeight:700 }}>
-                        {formatDate(ep.date)} — {ep.status==="posted" ? "✓ Gepostet" : deadlineLabel(days)}
+                        {formatDate(ep.date)} — {ep.status==="posted" ? "✓ Posted" : deadlineLabel(days)}
                       </span>
                     </div>
 
                     {/* Days between episodes */}
                     {i < episodes.length - 1 && (
                       <div style={{ marginTop:6, fontSize:9, color:MUTED, fontFamily:"monospace" }}>
-                        → Teil {ep.part+1} in {daysUntil(episodes[i+1].date) - daysUntil(ep.date)} Tagen
+                        → Part {ep.part+1} in {daysUntil(episodes[i+1].date) - daysUntil(ep.date)} days
                       </div>
                     )}
                   </div>
@@ -424,7 +424,7 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving }) {
             </div>
 
             {episodes.length === 0 && (
-              <div style={{ fontSize:12, color:MUTED, fontFamily:"monospace" }}>Noch keine Episoden geplant.</div>
+              <div style={{ fontSize:12, color:MUTED, fontFamily:"monospace" }}>No episodes planned yet.</div>
             )}
           </div>
         );
@@ -469,8 +469,8 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, saving, anal
 
         <div style={{ height:1, background:BORDER, marginBottom:20 }}/>
         <IB label="Hook – erste 2 Sekunden" value={reel.hook}/>
-        <IB label="Was filmen" value={reel.description}/>
-        <IB label="Format & Stil" value={reel.format}/>
+        <IB label="What to film" value={reel.description}/>
+        <IB label="Format & Style" value={reel.format}/>
 
         {reel.notes && (
           <div style={{ marginBottom:16, padding:"14px 16px", background:`${color}0F`, border:`1px solid ${color}33`, borderRadius:10 }}>
@@ -521,7 +521,7 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, saving, anal
 
         <div style={{ display:"flex", flexDirection:m?"column":"row", gap:10, justifyContent:"flex-end" }}>
           {!m && <Btn onClick={onClose} accent={MUTED}>CLOSE</Btn>}
-          <Btn onClick={() => onSaveAnalytics(reel.id, av)} accent={MUTED} disabled={saving}>{saving?"SAVING...":"ANALYTICS SPEICHERN"}</Btn>
+          <Btn onClick={() => onSaveAnalytics(reel.id, av)} accent={MUTED} disabled={saving}>{saving?"SAVING...":"SAVE ANALYTICS"}</Btn>
           {m && <Btn onClick={onClose} accent={MUTED}>CLOSE</Btn>}
         </div>
       </div>
@@ -547,12 +547,12 @@ function CalendarGrid({ reels, stories, onDayClick }) {
         <button onClick={pm} style={{ background:"none", border:`1px solid ${BORDER}`, borderRadius:8, width:40, height:40, cursor:"pointer", color:MUTED, fontSize:20, display:"flex", alignItems:"center", justifyContent:"center" }} onMouseEnter={e=>e.currentTarget.style.borderColor="#999"} onMouseLeave={e=>e.currentTarget.style.borderColor=BORDER}>‹</button>
         <div style={{ textAlign:"center" }}>
           <div style={{ fontSize:m?16:18, fontWeight:700, color:TEXT }}>{MONTH_NAMES[vM]} {vY}</div>
-          {!m && <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace" }}>Klick auf einen Tag für Details</div>}
+          {!m && <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace" }}>Click any day to see details</div>}
         </div>
         <button onClick={nm} style={{ background:"none", border:`1px solid ${BORDER}`, borderRadius:8, width:40, height:40, cursor:"pointer", color:MUTED, fontSize:20, display:"flex", alignItems:"center", justifyContent:"center" }} onMouseEnter={e=>e.currentTarget.style.borderColor="#999"} onMouseLeave={e=>e.currentTarget.style.borderColor=BORDER}>›</button>
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:m?2:4, marginBottom:m?2:4 }}>
-        {["So","Mo","Di","Mi","Do","Fr","Sa"].map(d => <div key={d} style={{ textAlign:"center", fontSize:m?8:10, color:MUTED, fontFamily:"monospace", padding:"3px 0" }}>{d}</div>)}
+        {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => <div key={d} style={{ textAlign:"center", fontSize:m?8:10, color:MUTED, fontFamily:"monospace", padding:"3px 0" }}>{d}</div>)}
       </div>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:m?2:4 }}>
         {Array.from({length:sd}).map((_,i) => <div key={`e${i}`}/>)}
@@ -591,7 +591,7 @@ function CalendarGrid({ reels, stories, onDayClick }) {
         })}
       </div>
       <div style={{ display:"flex", gap:m?10:16, marginTop:12, flexWrap:"wrap" }}>
-        {[{color:FRANZ,label:"Franz gepostet"},{color:AMBER,label:"Gefilmt"},{color:MUTED,label:"Geplant"},{color:TGC,label:"TGC gepostet"}].map(l => (
+        {[{color:FRANZ,label:"Franz posted"},{color:AMBER,label:"Filmed"},{color:MUTED,label:"Planned"},{color:TGC,label:"TGC posted"}].map(l => (
           <div key={l.label} style={{ display:"flex", alignItems:"center", gap:5 }}>
             <div style={{ width:7, height:7, borderRadius:"50%", background:l.color }}/><span style={{ fontSize:9, color:MUTED, fontFamily:"monospace" }}>{l.label}</span>
           </div>
@@ -641,7 +641,7 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
           <div>
             <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:3 }}>{MONTH_NAMES[month].toUpperCase()} {year}</div>
-            <div style={{ fontSize:m?17:22, fontWeight:700, color:TEXT }}>{new Date(`${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}T00:00:00`).toLocaleDateString("de-DE",{weekday:"long",day:"numeric",month:"long"})}</div>
+            <div style={{ fontSize:m?17:22, fontWeight:700, color:TEXT }}>{new Date(`${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}T00:00:00`).toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</div>
           </div>
           <button onClick={onClose} style={{ background:"none", border:"none", color:MUTED, fontSize:22, cursor:"pointer", padding:8 }}>✕</button>
         </div>
@@ -656,7 +656,7 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
           <div style={{ fontSize:11, color:TGC, fontFamily:"monospace", fontWeight:700, marginBottom:6 }}>TGC STORIES</div>
           {["morning","midday","evening"].map(slot => <div key={slot} style={{ fontSize:11, color:TEXT, marginBottom:3 }}><b>{slot}:</b> {s[slot]}</div>)}
         </div>)}
-        {fR.length===0&&tR.length===0&&fS.length===0&&tS.length===0&&<div style={{ textAlign:"center", padding:40, color:MUTED, fontFamily:"monospace" }}>Kein Content für diesen Tag.</div>}
+        {fR.length===0&&tR.length===0&&fS.length===0&&tS.length===0&&<div style={{ textAlign:"center", padding:40, color:MUTED, fontFamily:"monospace" }}>No content for this day.</div>}
         <div style={{ display:"flex", justifyContent:"flex-end", marginTop:14 }}><Btn onClick={onClose} accent={MUTED}>CLOSE</Btn></div>
       </div>
     </div>
@@ -676,7 +676,7 @@ export default function Dashboard() {
   const [saving,  setSaving]  = useState(false);
   const [error,   setError]   = useState(null);
 
-  const [tab,   setTab]   = useState("heute");
+  const [tab,   setTab]   = useState("today");
   const [brand, setBrand] = useState("franz");
 
   const [showAddReel,  setShowAddReel]  = useState(false);
@@ -696,7 +696,7 @@ export default function Dashboard() {
     try {
       const [s, r, st] = await Promise.all([fetchSeries(), fetchReels(), fetchStories()]);
       setSeries(s||[]); setReels(r||[]); setStories(st||[]);
-    } catch (e) { setError("Verbindung fehlgeschlagen: " + e.message); }
+    } catch (e) { setError("Connection failed: " + e.message); }
     finally { setLoading(false); }
   }, []);
 
@@ -827,11 +827,11 @@ export default function Dashboard() {
   };
 
   const TABS = [
-    ["heute",    "📅", "Heute"],
+    ["today", "📅", "Today"],
     ["calendar", "🗓", "Kalender"],
     ["reels",    "🎬", "Reels"],
     ["stories",  "📸", "Stories"],
-    ["serien",   "🎞", "Serien"],
+    ["series", "🎞", "Series"],
   ];
 
   return (
@@ -856,47 +856,47 @@ export default function Dashboard() {
           saving={saving}/>
       )}
       {showAddReel && (
-        <Modal title="Reel hinzufügen" onClose={()=>setShowAddReel(false)} onSave={handleAddReel} saving={saving} wide>
+        <Modal title="Add New Reel" onClose={()=>setShowAddReel(false)} onSave={handleAddReel} saving={saving} wide>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
             <div style={{ display:"flex", gap:8 }}>{["franz","tgc"].map(b=><BrandToggle key={b} brand={b} active={newReel.brand===b} onClick={()=>setNewReel(p=>({...p,brand:b}))} compact={m}/>)}</div>
             <div style={{ display:"flex", flexDirection:m?"column":"row", gap:8 }}>
               <div style={{ flex:1 }}><DatePicker value={newReel.date} onChange={v=>setNewReel(p=>({...p,date:v}))} accentColor={bc(newReel.brand)}/></div>
               <select value={newReel.type} onChange={e=>setNewReel(p=>({...p,type:e.target.value}))} style={{ flex:1, padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:6, color:TEXT, fontSize:14, fontFamily:"monospace", minHeight:44 }}>
-                <option value="REEL">Standalone Reel</option><option value="SERIES">Teil einer Serie</option>
+                <option value="REEL">Standalone Reel</option><option value="SERIES">Part of a Series</option>
               </select>
             </div>
             {newReel.type==="SERIES" && (
               <div style={{ display:"flex", flexDirection:m?"column":"row", gap:8 }}>
                 <select value={newReel.series} onChange={e=>setNewReel(p=>({...p,series:e.target.value}))} style={{ flex:1, padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:6, color:TEXT, fontSize:14, fontFamily:"monospace", minHeight:44 }}>
-                  <option value="">Serie auswählen...</option>
+                  <option value="">Select series...</option>
                   {series.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
-                <Input value={newReel.part} onChange={v=>setNewReel(p=>({...p,part:v}))} placeholder="Teil #" style={{ width:m?"100%":80 }}/>
+                <Input value={newReel.part} onChange={v=>setNewReel(p=>({...p,part:v}))} placeholder="Part #" style={{ width:m?"100%":80 }}/>
               </div>
             )}
-            <Input value={newReel.title}       onChange={v=>setNewReel(p=>({...p,title:v}))}       placeholder="Titel *"/>
+            <Input value={newReel.title}       onChange={v=>setNewReel(p=>({...p,title:v}))}       placeholder="Title *"/>
             <Input value={newReel.caption}     onChange={v=>setNewReel(p=>({...p,caption:v}))}     placeholder="Caption"/>
-            <Input value={newReel.hook}        onChange={v=>setNewReel(p=>({...p,hook:v}))}        placeholder="Hook — erste 2 Sekunden"/>
-            <textarea value={newReel.description} onChange={e=>setNewReel(p=>({...p,description:e.target.value}))} placeholder="Was filmen"
+            <Input value={newReel.hook}        onChange={v=>setNewReel(p=>({...p,hook:v}))}        placeholder="Hook — First 2 Seconds"/>
+            <textarea value={newReel.description} onChange={e=>setNewReel(p=>({...p,description:e.target.value}))} placeholder="What to film"
               style={{ padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:6, color:TEXT, fontSize:14, fontFamily:"monospace", minHeight:80, resize:"vertical" }}/>
-            <Input value={newReel.format} onChange={v=>setNewReel(p=>({...p,format:v}))} placeholder="Format & Stil"/>
+            <Input value={newReel.format} onChange={v=>setNewReel(p=>({...p,format:v}))} placeholder="Format & Style"/>
             <Input value={newReel.notes}  onChange={v=>setNewReel(p=>({...p,notes:v}))}  placeholder="Director's Note (optional)"/>
           </div>
         </Modal>
       )}
       {showAddStory && (
-        <Modal title="Story-Tag hinzufügen" onClose={()=>setShowAddStory(false)} onSave={handleAddStory} saving={saving}>
+        <Modal title="Add Story Day" onClose={()=>setShowAddStory(false)} onSave={handleAddStory} saving={saving}>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
             <div style={{ display:"flex", gap:8 }}>{["franz","tgc"].map(b=><BrandToggle key={b} brand={b} active={newStory.brand===b} onClick={()=>setNewStory(p=>({...p,brand:b}))} compact={m}/>)}</div>
             <DatePicker value={newStory.date} onChange={v=>setNewStory(p=>({...p,date:v}))} accentColor={bc(newStory.brand)}/>
-            <Input value={newStory.morning} onChange={v=>setNewStory(p=>({...p,morning:v}))} placeholder="Morgen Story"/>
-            <Input value={newStory.midday}  onChange={v=>setNewStory(p=>({...p,midday:v}))}  placeholder="Mittag Story"/>
-            <Input value={newStory.evening} onChange={v=>setNewStory(p=>({...p,evening:v}))} placeholder="Abend Story"/>
+            <Input value={newStory.morning} onChange={v=>setNewStory(p=>({...p,morning:v}))} placeholder="Morning story"/>
+            <Input value={newStory.midday}  onChange={v=>setNewStory(p=>({...p,midday:v}))}  placeholder="Midday story"/>
+            <Input value={newStory.evening} onChange={v=>setNewStory(p=>({...p,evening:v}))} placeholder="Evening story"/>
           </div>
         </Modal>
       )}
       {editSlot && (
-        <Modal title={`${editSlot.slot} Story bearbeiten`} onClose={()=>setEditSlot(null)} onSave={handleSaveEditSlot} saving={saving}>
+        <Modal title={`${editSlot.slot} Story edit`} onClose={()=>setEditSlot(null)} onSave={handleSaveEditSlot} saving={saving}>
           <textarea value={editVal} onChange={e=>setEditVal(e.target.value)} style={{ width:"100%", minHeight:120, padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:8, color:TEXT, fontSize:14, fontFamily:"monospace", resize:"vertical", boxSizing:"border-box" }}/>
         </Modal>
       )}
@@ -909,7 +909,7 @@ export default function Dashboard() {
             </div>
             <div style={{ border:`2px dashed ${BORDER}`, borderRadius:10, padding:24, textAlign:"center" }}>
               <input type="file" accept=".csv" onChange={handleBulkFile} style={{ display:"none" }} id="csvInput"/>
-              <label htmlFor="csvInput" style={{ cursor:"pointer", color:FRANZ, fontFamily:"monospace", fontSize:13, fontWeight:700 }}>{bulkFile?`✓ ${bulkFile.name}`:"CSV Datei auswählen"}</label>
+              <label htmlFor="csvInput" style={{ cursor:"pointer", color:FRANZ, fontFamily:"monospace", fontSize:13, fontWeight:700 }}>{bulkFile?`✓ ${bulkFile.name}`:"Select CSV file"}</label>
             </div>
             {bulkPreview && bulkPreview.map((row,i)=>(
               <div key={i} style={{ padding:"8px 10px", background:i%2===0?SOFT:CARD, borderRadius:4, fontSize:11, fontFamily:"monospace" }}>
@@ -950,8 +950,8 @@ export default function Dashboard() {
         {loading ? <Spinner/> : (
           <>
             {/* HEUTE */}
-            {tab==="heute" && (
-              <HeuteTab reels={reels} stories={stories} series={series}
+            {tab==="today" && (
+              <TodayTab reels={reels} stories={stories} series={series}
                 onToggleStatus={handleToggleStatus}
                 onOpenReel={(reel,brand)=>setDetailReel({reel,brand})}
                 saving={saving}/>
@@ -963,9 +963,9 @@ export default function Dashboard() {
                 {/* Stats */}
                 <div style={{ display:"grid", gridTemplateColumns:m?"1fr 1fr 1fr":"1fr 1fr 1fr 1fr 1fr", gap:m?8:12, marginBottom:m?14:24 }}>
                   {[
-                    { label:"Gepostet",  val:totalPosted,  color:GREEN },
-                    { label:"Gefilmt",   val:totalFilmed,  color:AMBER },
-                    { label:"Geplant",   val:totalPlanned, color:MUTED },
+                    { label:"Posted",   val:totalPosted,  color:GREEN },
+                    { label:"Filmed",   val:totalFilmed,  color:AMBER },
+                    { label:"Planned",   val:totalPlanned, color:MUTED },
                     { label:"Franz ✓",   val:reels.filter(r=>r.brand==="franz"&&r.status==="posted").length, total:reels.filter(r=>r.brand==="franz").length, color:FRANZ },
                     { label:"TGC ✓",     val:reels.filter(r=>r.brand==="tgc"&&r.status==="posted").length,   total:reels.filter(r=>r.brand==="tgc").length,   color:TGC   },
                   ].map((s,i)=>(
@@ -1006,7 +1006,7 @@ export default function Dashboard() {
                         <div style={{ display:"flex", alignItems:"flex-start", gap:8 }}>
                           <div style={{ flexShrink:0, minWidth:42 }}>
                             <div style={{ fontSize:11, fontWeight:700, color:TEXT }}>{formatDate(reel.date)}</div>
-                            <div style={{ fontSize:9, color:MUTED, fontFamily:"monospace" }}>{new Date(reel.date+"T00:00:00").toLocaleDateString("de-DE",{weekday:"short"}).toUpperCase()}</div>
+                            <div style={{ fontSize:9, color:MUTED, fontFamily:"monospace" }}>{new Date(reel.date+"T00:00:00").toLocaleDateString("en-GB",{weekday:"short"}).toUpperCase()}</div>
                           </div>
                           <div style={{ flex:1, minWidth:0 }}>
                             <div style={{ padding:"2px 7px", borderRadius:4, background:`${tc}15`, border:`1px solid ${tc}44`, fontSize:8, fontFamily:"monospace", color:tc, display:"inline-block", marginBottom:4, whiteSpace:"nowrap" }}>
@@ -1023,7 +1023,7 @@ export default function Dashboard() {
                       </div>
                     );
                   })}
-                  {reels.filter(r=>r.brand===brand).length===0&&<div style={{ textAlign:"center", padding:60, color:MUTED, fontFamily:"monospace" }}>Keine Reels.</div>}
+                  {reels.filter(r=>r.brand===brand).length===0&&<div style={{ textAlign:"center", padding:60, color:MUTED, fontFamily:"monospace" }}>No reels yet.</div>}
                 </div>
               </div>
             )}
@@ -1041,18 +1041,18 @@ export default function Dashboard() {
                 <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                   {stories.filter(s=>s.brand===brand).map(story=>{
                     const color=bc(brand);
-                    const slots=[{key:"morning",label:"Morgen",value:story.morning},{key:"midday",label:"Mittag",value:story.midday},{key:"evening",label:"Abend",value:story.evening}];
+                    const slots=[{key:"morning",label:"Morning",value:story.morning},{key:"midday",label:"Midday",value:story.midday},{key:"evening",label:"Evening",value:story.evening}];
                     const doneCount=slots.filter(s=>story[`${s.key}_status`]==="posted").length;
                     return (
                       <div key={story.id} style={{ background:doneCount===3?`${color}08`:CARD, border:`1px solid ${doneCount>0?color+"44":BORDER}`, borderLeft:`4px solid ${doneCount===3?color:doneCount>0?color+"88":BORDER}`, borderRadius:10, padding:"10px 12px" }}>
                         <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
                           <div style={{ flexShrink:0 }}>
                             <div style={{ fontSize:11, fontWeight:700, color:doneCount>0?color:TEXT }}>{formatDate(story.date)}</div>
-                            <div style={{ fontSize:9, color:MUTED, fontFamily:"monospace" }}>{new Date(story.date+"T00:00:00").toLocaleDateString("de-DE",{weekday:"short"}).toUpperCase()}</div>
+                            <div style={{ fontSize:9, color:MUTED, fontFamily:"monospace" }}>{new Date(story.date+"T00:00:00").toLocaleDateString("en-GB",{weekday:"short"}).toUpperCase()}</div>
                           </div>
                           <div style={{ flex:1 }}>
                             <div style={{ display:"flex", gap:3 }}>{slots.map(s=><div key={s.key} style={{ width:8, height:8, borderRadius:"50%", background:story[`${s.key}_status`]==="posted"?color:BORDER }}/>)}</div>
-                            <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", marginTop:2 }}>{doneCount}/3 gepostet</div>
+                            <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", marginTop:2 }}>{doneCount}/3 posted</div>
                           </div>
                           <button onClick={()=>handleDeleteStory(story.id)} style={{ background:"none", border:"none", color:MUTED, cursor:"pointer", fontSize:11, padding:4 }}>✕</button>
                         </div>
@@ -1073,7 +1073,7 @@ export default function Dashboard() {
                                   </div>
                                 </div>
                                 <div style={{ fontSize:m?10:11, color:TEXT, lineHeight:1.4 }}>{s.value}</div>
-                                <div style={{ marginTop:3, fontSize:8, color:done?color:MUTED, fontFamily:"monospace" }}>{done?"✓ gepostet":"tippen zum bearbeiten"}</div>
+                                <div style={{ marginTop:3, fontSize:8, color:done?color:MUTED, fontFamily:"monospace" }}>{done?"✓ posted":"tap to edit"}</div>
                               </div>
                             );
                           })}
@@ -1081,13 +1081,13 @@ export default function Dashboard() {
                       </div>
                     );
                   })}
-                  {stories.filter(s=>s.brand===brand).length===0&&<div style={{ textAlign:"center", padding:60, color:MUTED, fontFamily:"monospace" }}>Keine Stories.</div>}
+                  {stories.filter(s=>s.brand===brand).length===0&&<div style={{ textAlign:"center", padding:60, color:MUTED, fontFamily:"monospace" }}>No stories yet.</div>}
                 </div>
               </div>
             )}
 
             {/* SERIEN */}
-            {tab==="serien" && (
+            {tab==="series" && (
               <SerienTab series={series} reels={reels}
                 onOpenReel={(reel,brand)=>setDetailReel({reel,brand})}
                 onToggleStatus={handleToggleStatus}
