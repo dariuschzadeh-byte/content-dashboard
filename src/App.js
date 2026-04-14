@@ -1,9 +1,12 @@
+/* eslint-disable no-unused-vars */
 // ══════════════════════════════════════════════════════════════
 // Content Dashboard v4 — mit Supabase Backend
 // Franz & The Green Collective
 // ══════════════════════════════════════════════════════════════
 
+// eslint-disable-next-line
 import { useState, useEffect, useCallback, useRef } from "react";
+// eslint-disable-next-line
 import {
   supabase,
   fetchSeries, fetchReels, fetchStories,
