@@ -42,6 +42,42 @@ function useIsMobile(bp = 640) {
   return m;
 }
 
+// Swipe-right-from-left-edge to close (iOS-style back gesture)
+function useSwipeBack(onClose) {
+  useEffect(() => {
+    let startX = null;
+    let startY = null;
+    const onStart = (e) => {
+      const t = e.touches[0];
+      // Only register if swipe starts near left edge
+      if (t.clientX < 30) {
+        startX = t.clientX;
+        startY = t.clientY;
+      }
+    };
+    const onMove = (e) => {
+      if (startX === null) return;
+      const t = e.touches[0];
+      const dx = t.clientX - startX;
+      const dy = Math.abs(t.clientY - startY);
+      // Horizontal swipe > 80px and not too vertical
+      if (dx > 80 && dy < 50) {
+        startX = null;
+        onClose();
+      }
+    };
+    const onEnd = () => { startX = null; startY = null; };
+    window.addEventListener("touchstart", onStart, { passive:true });
+    window.addEventListener("touchmove",  onMove,  { passive:true });
+    window.addEventListener("touchend",   onEnd,   { passive:true });
+    return () => {
+      window.removeEventListener("touchstart", onStart);
+      window.removeEventListener("touchmove",  onMove);
+      window.removeEventListener("touchend",   onEnd);
+    };
+  }, [onClose]);
+}
+
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const formatDate  = (s) => s ? new Date(s + "T00:00:00").toLocaleDateString("en-GB", { day:"numeric", month:"short" }) : "—";
 const bc  = (b) => b === "franz" ? FRANZ : TGC;
@@ -231,14 +267,14 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, saving }
             const color = bc(reel.brand);
             const sObj  = reel.type==="SERIES" ? series.find(s=>s.id===reel.series_id) : null;
             return (
-              <div key={reel.id} style={{ background:CARD, border:`1px solid ${reel.status==="posted"?color+"44":BORDER}`, borderLeft:`4px solid ${color}`, borderRadius:12, padding:m?14:18, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+              <div key={reel.id} onClick={() => onOpenReel(reel, reel.brand)} style={{ background:CARD, border:`1px solid ${reel.status==="posted"?color+"44":BORDER}`, borderLeft:`4px solid ${color}`, borderRadius:12, padding:m?14:18, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", cursor:"pointer" }}>
                 {/* Brand + Series */}
                 <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, flexWrap:"wrap" }}>
                   <div style={{ padding:"3px 10px", borderRadius:4, background:`${color}18`, border:`1px solid ${color}44`, fontSize:10, fontFamily:"monospace", color, fontWeight:700 }}>
                     {reel.brand==="franz"?"FRANZ":"TGC"}
                   </div>
                   {sObj && <div style={{ padding:"3px 10px", borderRadius:4, background:`${sObj.color}11`, border:`1px solid ${sObj.color}33`, fontSize:10, fontFamily:"monospace", color:sObj.color }}>{sObj.name} · Pt {reel.part}</div>}
-                  <StatusBadge status={reel.status} onClick={() => onToggleStatus(reel.id, reel.status)} disabled={saving}/>
+                  <div onClick={e => e.stopPropagation()}><StatusBadge status={reel.status} onClick={() => onToggleStatus(reel.id, reel.status)} disabled={saving}/></div>
                 </div>
 
                 {/* Title */}
@@ -257,10 +293,8 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, saving }
                   <div style={{ fontSize:12, color:MUTED, fontStyle:"italic", marginBottom:8 }}>Caption: "{reel.caption}"</div>
                 )}
 
-                {/* Details button */}
-                <button onClick={() => onOpenReel(reel, reel.brand)} style={{ padding:"6px 14px", borderRadius:6, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:10, fontFamily:"monospace", cursor:"pointer" }}>
-                  VIEW DETAILS →
-                </button>
+                {/* Tap hint */}
+                <div style={{ fontSize:9, color:MUTED, fontFamily:"monospace", letterSpacing:"1px", marginTop:8 }}>TAP CARD FOR DETAILS →</div>
               </div>
             );
           })}
@@ -436,8 +470,9 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving }) {
 // ══════════════════════════════════════════════════════════════
 // REEL DETAIL MODAL
 // ══════════════════════════════════════════════════════════════
-function ReelDetail({ reel, brand, series, onClose, onToggleStatus, saving, analytics, onSaveAnalytics }) {
+function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus, saving, analytics, onSaveAnalytics }) {
   const m     = useIsMobile();
+  useSwipeBack(onClose);
   const color = bc(brand);
   const sObj  = reel.type==="SERIES" ? series.find(s=>s.id===reel.series_id) : null;
   const tc    = sObj?.color || color;
@@ -452,7 +487,7 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, saving, anal
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:m?"flex-end":"center", justifyContent:"center", padding:m?0:20 }}>
-      <div style={{ background:CARD, borderTop:`4px solid ${color}`, borderRadius:m?"16px 16px 0 0":"16px", padding:m?"20px 16px 36px":"32px", width:m?"100%":640, maxWidth:"100%", maxHeight:m?"94vh":"90vh", overflowY:"auto", boxShadow:"0 -8px 40px rgba(0,0,0,0.2)" }}>
+      <div style={{ background:CARD, borderTop:`4px solid ${color}`, borderRadius:m?"16px 16px 0 0":"16px", padding:m?"max(20px, env(safe-area-inset-top)) 16px 36px":"32px", width:m?"100%":640, maxWidth:"100%", maxHeight:m?"94vh":"90vh", overflowY:"auto", boxShadow:"0 -8px 40px rgba(0,0,0,0.2)" }}>
         {m && <div style={{ width:40, height:4, background:BORDER, borderRadius:2, margin:"0 auto 16px" }}/>}
 
         <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:20 }}>
@@ -484,22 +519,20 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, saving, anal
           <div style={{ fontSize:14, color:TEXT, fontStyle:"italic" }}>"{reel.caption}"</div>
         </div>
 
-        {/* Status flow */}
+        {/* Status — any of the 3 stages can be clicked to set directly */}
         <div style={{ marginBottom:20 }}>
-          <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:10 }}>STATUS</div>
-          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+          <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:10 }}>STATUS — TAP TO CHANGE</div>
+          <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
             {STATUS_FLOW.map((s, i) => {
-              const isActive  = reel.status === s;
-              const isPast    = STATUS_FLOW.indexOf(reel.status) > i;
-              const sColor    = STATUS_COLOR[s];
+              const isActive = reel.status === s;
+              const sColor   = STATUS_COLOR[s];
               return (
-                <div key={s} style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <div style={{ padding:"6px 14px", borderRadius:20, border:`1.5px solid ${isActive||isPast?sColor:BORDER}`, background:isActive?sColor:isPast?`${sColor}22`:"transparent", color:isActive?"#fff":isPast?sColor:MUTED, fontSize:11, fontFamily:"monospace", fontWeight:isActive?700:400, cursor:"pointer", transition:"all 0.15s" }}
-                    onClick={() => !saving && onToggleStatus(reel.id, reel.status)}>
-                    {STATUS_LABEL[s]}
-                  </div>
-                  {i < 2 && <span style={{ color:BORDER, fontSize:16 }}>→</span>}
-                </div>
+                <button key={s} disabled={saving}
+                  onClick={() => !saving && onSetStatus && onSetStatus(reel.id, s)}
+                  style={{ padding:"10px 18px", borderRadius:24, border:`2px solid ${isActive?sColor:BORDER}`, background:isActive?sColor:"transparent", color:isActive?"#fff":sColor, fontSize:12, fontFamily:"monospace", fontWeight:isActive?700:600, cursor:saving?"default":"pointer", transition:"all 0.15s", minHeight:44, letterSpacing:"0.5px" }}>
+                  {s === "planned" && "○ "}{s === "filmed" && "◑ "}{s === "posted" && "● "}
+                  {STATUS_LABEL[s]}
+                </button>
               );
             })}
           </div>
@@ -579,13 +612,25 @@ function CalendarGrid({ reels, stories, onDayClick }) {
               style={{ minHeight:m?52:72, borderRadius:m?6:8, padding:m?"4px":"6px 7px", background:isT?`${FRANZ}11`:CARD, border:`1px solid ${isT?FRANZ:BORDER}`, cursor:"pointer", transition:"all 0.15s", boxShadow:(fR.length>0||tR.length>0)?"0 1px 3px rgba(0,0,0,0.05)":"none" }}
               onMouseEnter={e => e.currentTarget.style.borderColor="#999"}
               onMouseLeave={e => { e.currentTarget.style.borderColor = isT?FRANZ:BORDER; }}>
-              <div style={{ fontSize:m?10:12, fontWeight:isT?700:500, color:isT?FRANZ:TEXT, marginBottom:m?2:4, fontFamily:"monospace" }}>{day}</div>
-              {fDot && <div style={{ display:"flex", alignItems:"center", gap:2, marginBottom:2 }}><div style={{ width:m?4:6, height:m?4:6, borderRadius:"50%", background:fDot, flexShrink:0 }}/>{!m && <div style={{ fontSize:9, color:fRd?FRANZ:MUTED, fontFamily:"monospace", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{fR[0]?.title}</div>}</div>}
-              {tDot && <div style={{ display:"flex", alignItems:"center", gap:2, marginBottom:2 }}><div style={{ width:m?4:6, height:m?4:6, borderRadius:"50%", background:tDot, flexShrink:0 }}/>{!m && <div style={{ fontSize:9, color:tRd?TGC:MUTED, fontFamily:"monospace", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{tR[0]?.title}</div>}</div>}
-              {(fS.length>0||tS.length>0) && <div style={{ display:"flex", gap:1, marginTop:2, flexWrap:"wrap" }}>
-                {fS.length>0 && [0,1,2].map(i => <div key={`f${i}`} style={{ width:m?3:4, height:m?3:4, borderRadius:"50%", background:i<fSd?FRANZ:`${FRANZ}33` }}/>)}
-                {tS.length>0 && [0,1,2].map(i => <div key={`t${i}`} style={{ width:m?3:4, height:m?3:4, borderRadius:"50%", background:i<tSd?TGC:`${TGC}33` }}/>)}
-              </div>}
+              <div style={{ fontSize:m?11:12, fontWeight:isT?700:500, color:isT?FRANZ:TEXT, marginBottom:m?3:4, fontFamily:"monospace" }}>{day}</div>
+              {/* Franz indicator — pill with reel + stories count */}
+              {(fR.length>0 || fS.length>0) && (
+                <div style={{ display:"flex", alignItems:"center", gap:3, marginBottom:m?3:4, padding:m?"2px 4px":"3px 5px", background:`${FRANZ}15`, borderRadius:m?4:6, border:`1px solid ${fRd?FRANZ:FRANZ+"44"}` }}>
+                  {fR.length>0 && <div style={{ width:m?6:7, height:m?6:7, borderRadius:"50%", background:fDot, flexShrink:0 }}/>}
+                  {!m && fR[0] && <div style={{ fontSize:9, color:fRd?FRANZ:MUTED, fontFamily:"monospace", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>F · {fR[0]?.title.slice(0,12)}</div>}
+                  {m && fR.length>0 && <span style={{ fontSize:7, color:fRd?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700 }}>F</span>}
+                  {fS.length>0 && <span style={{ fontSize:m?7:8, color:fSd>0?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700, marginLeft:"auto" }}>{fSd}/3</span>}
+                </div>
+              )}
+              {/* TGC indicator — pill with reel + stories count */}
+              {(tR.length>0 || tS.length>0) && (
+                <div style={{ display:"flex", alignItems:"center", gap:3, marginBottom:m?2:3, padding:m?"2px 4px":"3px 5px", background:`${TGC}15`, borderRadius:m?4:6, border:`1px solid ${tRd?TGC:TGC+"44"}` }}>
+                  {tR.length>0 && <div style={{ width:m?6:7, height:m?6:7, borderRadius:"50%", background:tDot, flexShrink:0 }}/>}
+                  {!m && tR[0] && <div style={{ fontSize:9, color:tRd?TGC:MUTED, fontFamily:"monospace", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>T · {tR[0]?.title.slice(0,12)}</div>}
+                  {m && tR.length>0 && <span style={{ fontSize:7, color:tRd?TGC:MUTED, fontFamily:"monospace", fontWeight:700 }}>T</span>}
+                  {tS.length>0 && <span style={{ fontSize:m?7:8, color:tSd>0?TGC:MUTED, fontFamily:"monospace", fontWeight:700, marginLeft:"auto" }}>{tSd}/3</span>}
+                </div>
+              )}
             </div>
           );
         })}
@@ -606,6 +651,7 @@ function CalendarGrid({ reels, stories, onDayClick }) {
 // ══════════════════════════════════════════════════════════════
 function DayModal({ day, year, month, reels, stories, series, onClose, onOpenReel, onToggleReel, onToggleStory, saving }) {
   const m   = useIsMobile();
+  useSwipeBack(onClose);
   const ds  = `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
   const fR  = reels.filter(r => r.brand==="franz" && r.date===ds);
   const tR  = reels.filter(r => r.brand==="tgc"   && r.date===ds);
@@ -616,27 +662,29 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
     const color = bc(brand);
     const sObj  = reel.type==="SERIES" ? series.find(s=>s.id===reel.series_id) : null;
     return (
-      <div style={{ padding:"12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10, marginBottom:10 }}>
+      <div onClick={() => onOpenReel(reel, brand)} style={{ padding:"12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10, marginBottom:10, cursor:"pointer", transition:"all 0.15s" }}
+        onMouseEnter={e => e.currentTarget.style.borderColor=color}
+        onMouseLeave={e => e.currentTarget.style.borderColor=BORDER}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6, flexWrap:"wrap", gap:6 }}>
           <div style={{ display:"flex", gap:6, alignItems:"center" }}>
             <div style={{ width:8, height:8, borderRadius:"50%", background:color }}/>
             <span style={{ fontSize:11, color, fontFamily:"monospace", fontWeight:700 }}>{brand==="franz"?"FRANZ":"TGC"}</span>
             {sObj && <span style={{ fontSize:10, color:sObj.color, fontFamily:"monospace" }}>{sObj.name} · Pt {reel.part}</span>}
           </div>
-          <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+          <div onClick={e => e.stopPropagation()}>
             <StatusBadge status={reel.status} onClick={() => onToggleReel(reel.id, reel.status)} disabled={saving}/>
-            <button onClick={() => onOpenReel(reel, brand)} style={{ padding:"5px 10px", borderRadius:6, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:10, fontFamily:"monospace", cursor:"pointer", minHeight:30 }}>DETAILS</button>
           </div>
         </div>
         <div style={{ fontSize:15, fontWeight:600, color:TEXT }}>{reel.title}</div>
         {reel.hook && <div style={{ fontSize:12, color:MUTED, fontStyle:"italic", marginTop:2 }}>"{reel.hook}"</div>}
+        <div style={{ fontSize:9, color:MUTED, fontFamily:"monospace", marginTop:6, letterSpacing:"1px" }}>TAP FOR DETAILS →</div>
       </div>
     );
   };
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:m?"flex-end":"center", justifyContent:"center", padding:m?0:20 }}>
-      <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:m?"16px 16px 0 0":"16px", padding:m?"16px 12px 36px":"28px", width:m?"100%":640, maxWidth:"100%", maxHeight:m?"94vh":"90vh", overflowY:"auto" }}>
+      <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:m?"16px 16px 0 0":"16px", padding:m?"max(16px, env(safe-area-inset-top)) 12px 36px":"28px", width:m?"100%":640, maxWidth:"100%", maxHeight:m?"94vh":"90vh", overflowY:"auto" }}>
         {m && <div style={{ width:40, height:4, background:BORDER, borderRadius:2, margin:"0 auto 14px" }}/>}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
           <div>
@@ -702,16 +750,25 @@ export default function Dashboard() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // ── Status toggle — optimistic update for instant UI feedback ──
+  // ── Status toggle — cycles forward planned→filmed→posted→planned ──
   const handleToggleStatus = async (id, currentStatus) => {
-    const ns = nextStatus(currentStatus);
-    // Update UI immediately so it feels instant
+    const ns = currentStatus === "posted" ? "planned" : nextStatus(currentStatus);
     setReels(prev => prev.map(r => r.id===id ? {...r, status:ns} : r));
     try {
       await updateReelStatus(id, ns);
     } catch (e) {
-      // Revert on error
       setReels(prev => prev.map(r => r.id===id ? {...r, status:currentStatus} : r));
+      setError("Status update failed: " + e.message);
+    }
+  };
+  // ── Set status directly to a specific value ──
+  const handleSetStatus = async (id, newStatus) => {
+    const prev = reels.find(r => r.id === id)?.status;
+    setReels(prev => prev.map(r => r.id===id ? {...r, status:newStatus} : r));
+    try {
+      await updateReelStatus(id, newStatus);
+    } catch (e) {
+      setReels(prevReels => prevReels.map(r => r.id===id ? {...r, status:prev} : r));
       setError("Status update failed: " + e.message);
     }
   };
@@ -745,11 +802,16 @@ export default function Dashboard() {
   };
 
   const handleToggleStory = async (id, slot, currentStatus) => {
-    setSaving(true);
+    // Optimistic update — flip checkbox immediately
+    const newStatus = currentStatus === "posted" ? "planned" : "posted";
+    setStories(prev=>prev.map(s=>s.id===id?{...s,[`${slot}_status`]:newStatus}:s));
     try {
-      const updated = await updateStorySlotStatus(id, slot, currentStatus!=="posted");
-      setStories(prev=>prev.map(s=>s.id===id?{...s,[`${slot}_status`]:updated[`${slot}_status`]}:s));
-    } catch(e){setError(e.message);}finally{setSaving(false);}
+      await updateStorySlotStatus(id, slot, currentStatus!=="posted");
+    } catch(e){
+      // Revert on error
+      setStories(prev=>prev.map(s=>s.id===id?{...s,[`${slot}_status`]:currentStatus}:s));
+      setError(e.message);
+    }
   };
 
   const handleDeleteStory = async (id) => {
@@ -842,6 +904,7 @@ export default function Dashboard() {
         <ReelDetail reel={detailReel.reel} brand={detailReel.brand} series={series}
           onClose={()=>setDetailReel(null)}
           onToggleStatus={handleToggleStatus}
+          onSetStatus={handleSetStatus}
           saving={saving}
           analytics={detailReel.reel.analytics?.[0]}
           onSaveAnalytics={handleSaveAnalytics}/>
@@ -921,7 +984,7 @@ export default function Dashboard() {
       )}
 
       {/* ── Header ── */}
-      <div style={{ borderBottom:`1px solid ${BORDER}`, padding:m?"12px 12px":"16px 28px", display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:50, background:BG }}>
+      <div style={{ borderBottom:`1px solid ${BORDER}`, padding:m?"max(12px, env(safe-area-inset-top)) 12px 12px":"16px 28px", display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:50, background:BG }}>
         <div style={{ display:"flex", alignItems:"center", gap:m?8:16 }}>
           {saving && <div style={{ width:6, height:6, borderRadius:"50%", background:FRANZ, animation:"pulse 1s infinite" }}/>}
           <div>
@@ -1101,10 +1164,10 @@ export default function Dashboard() {
       {m && (
         <div style={{ position:"fixed", bottom:0, left:0, right:0, background:CARD, borderTop:`1px solid ${BORDER}`, display:"flex", zIndex:60, boxShadow:"0 -4px 20px rgba(0,0,0,0.08)" }}>
           {TABS.map(([id,icon,label])=>(
-            <button key={id} onClick={()=>setTab(id)} style={{ flex:1, padding:"10px 4px 14px", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}>
-              <span style={{ fontSize:18 }}>{icon}</span>
-              <span style={{ fontSize:8, fontFamily:"monospace", color:tab===id?TEXT:MUTED, fontWeight:tab===id?700:400 }}>{label.toUpperCase()}</span>
-              {tab===id && <div style={{ width:20, height:2, background:TEXT, borderRadius:1, marginTop:1 }}/>}
+            <button key={id} onClick={()=>setTab(id)} style={{ flex:1, padding:"12px 4px 18px", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
+              <span style={{ fontSize:22 }}>{icon}</span>
+              <span style={{ fontSize:10, fontFamily:"monospace", color:tab===id?TEXT:MUTED, fontWeight:tab===id?700:400, letterSpacing:"0.5px" }}>{label.toUpperCase()}</span>
+              {tab===id && <div style={{ width:24, height:2, background:TEXT, borderRadius:1, marginTop:2 }}/>}
             </button>
           ))}
         </div>
