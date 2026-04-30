@@ -464,7 +464,7 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, saving, anal
             </div>
             <div style={{ fontSize:m?20:24, fontWeight:700, color:TEXT }}>{reel.title}</div>
           </div>
-          <button onClick={onClose} style={{ background:"none", border:"none", color:MUTED, fontSize:22, cursor:"pointer", padding:"0 0 0 12px", lineHeight:1, flexShrink:0 }}>✕</button>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:MUTED, fontSize:22, cursor:"pointer", padding:"12px", lineHeight:1, flexShrink:0, minWidth:48, minHeight:48, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:8 }}>✕</button>
         </div>
 
         <div style={{ height:1, background:BORDER, marginBottom:20 }}/>
@@ -643,7 +643,7 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
             <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:3 }}>{MONTH_NAMES[month].toUpperCase()} {year}</div>
             <div style={{ fontSize:m?17:22, fontWeight:700, color:TEXT }}>{new Date(`${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}T00:00:00`).toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</div>
           </div>
-          <button onClick={onClose} style={{ background:"none", border:"none", color:MUTED, fontSize:22, cursor:"pointer", padding:8 }}>✕</button>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:MUTED, fontSize:22, cursor:"pointer", padding:12, minWidth:48, minHeight:48, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:8 }}>✕</button>
         </div>
         <div style={{ height:1, background:BORDER, marginBottom:14 }}/>
         {fR.map(r => <RR key={r.id} reel={r} brand="franz"/>)}
@@ -702,18 +702,18 @@ export default function Dashboard() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // ── Status toggle — cycles through planned→filmed→posted→planned ──
+  // ── Status toggle — optimistic update for instant UI feedback ──
   const handleToggleStatus = async (id, currentStatus) => {
-    setSaving(true); setError(null);
     const ns = nextStatus(currentStatus);
+    // Update UI immediately so it feels instant
+    setReels(prev => prev.map(r => r.id===id ? {...r, status:ns} : r));
     try {
-      const { data, error } = await import("./supabaseClient").then(m => m.supabase
-        ? import("./supabaseClient").then(mod => mod.supabase.from("reels").update({ status:ns, ...(ns==="posted"?{posted_at:new Date().toISOString()}:{posted_at:null}) }).eq("id",id).select().single())
-        : Promise.reject("no supabase")
-      );
-      setReels(prev => prev.map(r => r.id===id ? {...r, status:ns} : r));
-    } catch (e) { setError(e.message||String(e)); }
-    finally { setSaving(false); }
+      await updateReelStatus(id, ns);
+    } catch (e) {
+      // Revert on error
+      setReels(prev => prev.map(r => r.id===id ? {...r, status:currentStatus} : r));
+      setError("Status update failed: " + e.message);
+    }
   };
 
   const handleAddReel = async () => {
