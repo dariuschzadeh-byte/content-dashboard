@@ -238,25 +238,31 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, onEditSt
   const franzStories = stories.filter(s => s.date === todayStr && s.brand === "franz");
   const tgcStories   = stories.filter(s => s.date === todayStr && s.brand === "tgc");
 
-  const tomorrow     = new Date(); tomorrow.setDate(tomorrow.getDate()+1);
-  const tomorrowStr  = tomorrow.toISOString().split("T")[0];
-  const tomorrowReels = reels.filter(r => r.date === tomorrowStr);
-
   // KPIs per brand
   const franzReelsPosted = franzReels.filter(r => r.status === "posted").length;
   const franzReelsTotal  = franzReels.length;
   const tgcReelsPosted   = tgcReels.filter(r => r.status === "posted").length;
   const tgcReelsTotal    = tgcReels.length;
 
+  const STORY_SLOTS = ["slot1","slot2","slot3","slot4","slot5","slot6"];
+  const LEGACY_SLOTS = ["morning","midday","evening"];
   const countStoriesPosted = (storiesArr) =>
-    storiesArr.reduce((n,s) => n + ["morning","midday","evening"].filter(sl => s[`${sl}_status`] === "posted").length, 0);
+    storiesArr.reduce((n,s) => {
+      const newSlots = STORY_SLOTS.filter(sl => s[`${sl}_status`] === "posted").length;
+      const legacySlots = LEGACY_SLOTS.filter(sl => s[`${sl}_status`] === "posted").length;
+      return n + Math.max(newSlots, legacySlots);
+    }, 0);
   const countStoriesTotal = (storiesArr) =>
-    storiesArr.reduce((n,s) => n + ["morning","midday","evening"].filter(sl => s[sl]).length, 0);
+    storiesArr.reduce((n,s) => {
+      const newSlots = STORY_SLOTS.filter(sl => s[sl]).length;
+      const legacySlots = LEGACY_SLOTS.filter(sl => s[sl]).length;
+      return n + Math.max(newSlots, legacySlots);
+    }, 0);
 
   const franzStoriesPosted = countStoriesPosted(franzStories);
-  const franzStoriesTotal  = countStoriesTotal(franzStories) || (franzStories.length * 3);
+  const franzStoriesTotal  = countStoriesTotal(franzStories) || (franzStories.length * 6);
   const tgcStoriesPosted   = countStoriesPosted(tgcStories);
-  const tgcStoriesTotal    = countStoriesTotal(tgcStories) || (tgcStories.length * 3);
+  const tgcStoriesTotal    = countStoriesTotal(tgcStories) || (tgcStories.length * 6);
 
   const totalPosted = franzReelsPosted + tgcReelsPosted + franzStoriesPosted + tgcStoriesPosted;
   const totalToPost = franzReelsTotal + tgcReelsTotal + franzStoriesTotal + tgcStoriesTotal;
@@ -341,9 +347,12 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, onEditSt
       const color = id === "franz-stories" ? FRANZ : TGC;
       return storiesToShow.map(story => {
         const slots = [
-          { key:"morning", label:"Morning", value:story.morning, status:story.morning_status },
-          { key:"midday",  label:"Midday",  value:story.midday,  status:story.midday_status  },
-          { key:"evening", label:"Evening", value:story.evening, status:story.evening_status },
+          { key:"slot1", label:"Slot 1", value:story.slot1 || story.morning, status:story.slot1_status || story.morning_status },
+          { key:"slot2", label:"Slot 2", value:story.slot2 || story.midday,  status:story.slot2_status || story.midday_status  },
+          { key:"slot3", label:"Slot 3", value:story.slot3 || story.evening, status:story.slot3_status || story.evening_status },
+          { key:"slot4", label:"Slot 4", value:story.slot4, status:story.slot4_status },
+          { key:"slot5", label:"Slot 5", value:story.slot5, status:story.slot5_status },
+          { key:"slot6", label:"Slot 6", value:story.slot6, status:story.slot6_status },
         ];
         return (
           <div key={story.id} style={{ background:CARD, border:`1px solid ${BORDER}`, borderLeft:`4px solid ${color}`, borderRadius:12, padding:m?12:14, marginBottom:8 }}>
@@ -408,25 +417,6 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, onEditSt
         </div>
       )}
 
-      {/* Tomorrow Preview */}
-      {tomorrowReels.length > 0 && (
-        <div style={{ marginTop:24 }}>
-          <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:8 }}>TOMORROW</div>
-          {tomorrowReels.map(reel => {
-            const color = bc(reel.brand);
-            return (
-              <div key={reel.id} style={{ background:SOFT, border:`1px solid ${BORDER}`, borderLeft:`4px solid ${color}44`, borderRadius:10, padding:"12px 14px", marginBottom:8, opacity:0.75 }}>
-                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
-                  <span style={{ fontSize:10, color, fontFamily:"monospace", fontWeight:700 }}>{reel.brand==="franz"?"FRANZ":"TGC"}</span>
-                  <StatusBadge status={reel.status}/>
-                </div>
-                <div style={{ fontSize:14, fontWeight:600, color:TEXT }}>{reel.title}</div>
-                {reel.hook && <div style={{ fontSize:11, color:MUTED, fontStyle:"italic", marginTop:2 }}>"{reel.hook}"</div>}
-              </div>
-            );
-          })}
-        </div>
-      )}
     </div>
   );
 }
@@ -566,7 +556,7 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:m?"flex-end":"center", justifyContent:"center", padding:m?0:20 }}>
-      <div style={{ background:CARD, borderTop:`4px solid ${color}`, borderRadius:m?"16px 16px 0 0":"16px", padding:m?"max(20px, env(safe-area-inset-top)) 16px 36px":"32px", width:m?"100%":640, maxWidth:"100%", maxHeight:m?"94vh":"90vh", overflowY:"auto", boxShadow:"0 -8px 40px rgba(0,0,0,0.2)" }}>
+      <div style={{ background:CARD, borderTop:`4px solid ${color}`, borderRadius:m?"16px 16px 0 0":"16px", padding:m?"calc(env(safe-area-inset-top) + 28px) 16px 36px":"32px", width:m?"100%":640, maxWidth:"100%", maxHeight:m?"94vh":"90vh", overflowY:"auto", boxShadow:"0 -8px 40px rgba(0,0,0,0.2)" }}>
         {m && <div style={{ width:40, height:4, background:BORDER, borderRadius:2, margin:"0 auto 16px" }}/>}
 
         <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:20 }}>
@@ -890,7 +880,7 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
 
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.45)", zIndex:1000, display:"flex", alignItems:m?"flex-end":"center", justifyContent:"center", padding:m?0:20 }}>
-      <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:m?"16px 16px 0 0":"16px", padding:m?"max(16px, env(safe-area-inset-top)) 12px 36px":"28px", width:m?"100%":640, maxWidth:"100%", maxHeight:m?"94vh":"90vh", overflowY:"auto" }}>
+      <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:m?"16px 16px 0 0":"16px", padding:m?"calc(env(safe-area-inset-top) + 24px) 12px 36px":"28px", width:m?"100%":640, maxWidth:"100%", maxHeight:m?"94vh":"90vh", overflowY:"auto" }}>
         {m && <div style={{ width:40, height:4, background:BORDER, borderRadius:2, margin:"0 auto 14px" }}/>}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
           <div>
@@ -928,9 +918,12 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
             {/* FRANZ Stories */}
             {fS.map(story => {
               const slots = [
-                { key:"morning", label:"Morning", value:story.morning, status:story.morning_status },
-                { key:"midday",  label:"Midday",  value:story.midday,  status:story.midday_status  },
-                { key:"evening", label:"Evening", value:story.evening, status:story.evening_status },
+                { key:"slot1", label:"Slot 1", value:story.slot1 || story.morning, status:story.slot1_status || story.morning_status },
+                { key:"slot2", label:"Slot 2", value:story.slot2 || story.midday,  status:story.slot2_status || story.midday_status  },
+                { key:"slot3", label:"Slot 3", value:story.slot3 || story.evening, status:story.slot3_status || story.evening_status },
+                { key:"slot4", label:"Slot 4", value:story.slot4, status:story.slot4_status },
+                { key:"slot5", label:"Slot 5", value:story.slot5, status:story.slot5_status },
+                { key:"slot6", label:"Slot 6", value:story.slot6, status:story.slot6_status },
               ];
               const doneCount = slots.filter(s => s.status === "posted").length;
               return (
@@ -966,9 +959,12 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
             {/* TGC Stories */}
             {tS.map(story => {
               const slots = [
-                { key:"morning", label:"Morning", value:story.morning, status:story.morning_status },
-                { key:"midday",  label:"Midday",  value:story.midday,  status:story.midday_status  },
-                { key:"evening", label:"Evening", value:story.evening, status:story.evening_status },
+                { key:"slot1", label:"Slot 1", value:story.slot1 || story.morning, status:story.slot1_status || story.morning_status },
+                { key:"slot2", label:"Slot 2", value:story.slot2 || story.midday,  status:story.slot2_status || story.midday_status  },
+                { key:"slot3", label:"Slot 3", value:story.slot3 || story.evening, status:story.slot3_status || story.evening_status },
+                { key:"slot4", label:"Slot 4", value:story.slot4, status:story.slot4_status },
+                { key:"slot5", label:"Slot 5", value:story.slot5, status:story.slot5_status },
+                { key:"slot6", label:"Slot 6", value:story.slot6, status:story.slot6_status },
               ];
               const doneCount = slots.filter(s => s.status === "posted").length;
               return (
@@ -1030,7 +1026,7 @@ export default function Dashboard() {
   const [showAddReel,  setShowAddReel]  = useState(false);
   const [newReel,      setNewReel]      = useState({ brand:"franz", date:"", title:"", caption:"", hook:"", description:"", format:"", notes:"", type:"REEL", series:"", part:"" });
   const [showAddStory, setShowAddStory] = useState(false);
-  const [newStory,     setNewStory]     = useState({ brand:"franz", date:"", morning:"", midday:"", evening:"" });
+  const [newStory,     setNewStory]     = useState({ brand:"franz", date:"", slot1:"", slot2:"", slot3:"", slot4:"", slot5:"", slot6:"" });
   const [editSlot,     setEditSlot]     = useState(null);
   const [editVal,      setEditVal]      = useState("");
   const [detailReel,   setDetailReel]   = useState(null);
@@ -1093,7 +1089,7 @@ export default function Dashboard() {
     try {
       const created = await addStory(newStory);
       setStories(prev => [...prev, created].sort((a,b)=>a.date.localeCompare(b.date)));
-      setNewStory({ brand:"franz", date:"", morning:"", midday:"", evening:"" });
+      setNewStory({ brand:"franz", date:"", slot1:"", slot2:"", slot3:"", slot4:"", slot5:"", slot6:"" });
       setShowAddStory(false);
     } catch(e){setError(e.message);}finally{setSaving(false);}
   };
@@ -1257,9 +1253,12 @@ export default function Dashboard() {
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
             <div style={{ display:"flex", gap:8 }}>{["franz","tgc"].map(b=><BrandToggle key={b} brand={b} active={newStory.brand===b} onClick={()=>setNewStory(p=>({...p,brand:b}))} compact={m}/>)}</div>
             <DatePicker value={newStory.date} onChange={v=>setNewStory(p=>({...p,date:v}))} accentColor={bc(newStory.brand)}/>
-            <Input value={newStory.morning} onChange={v=>setNewStory(p=>({...p,morning:v}))} placeholder="Morning story"/>
-            <Input value={newStory.midday}  onChange={v=>setNewStory(p=>({...p,midday:v}))}  placeholder="Midday story"/>
-            <Input value={newStory.evening} onChange={v=>setNewStory(p=>({...p,evening:v}))} placeholder="Evening story"/>
+            <Input value={newStory.slot1} onChange={v=>setNewStory(p=>({...p,slot1:v}))} placeholder="Story slot 1"/>
+            <Input value={newStory.slot2} onChange={v=>setNewStory(p=>({...p,slot2:v}))} placeholder="Story slot 2"/>
+            <Input value={newStory.slot3} onChange={v=>setNewStory(p=>({...p,slot3:v}))} placeholder="Story slot 3"/>
+            <Input value={newStory.slot4} onChange={v=>setNewStory(p=>({...p,slot4:v}))} placeholder="Story slot 4"/>
+            <Input value={newStory.slot5} onChange={v=>setNewStory(p=>({...p,slot5:v}))} placeholder="Story slot 5"/>
+            <Input value={newStory.slot6} onChange={v=>setNewStory(p=>({...p,slot6:v}))} placeholder="Story slot 6"/>
           </div>
         </Modal>
       )}
@@ -1411,7 +1410,13 @@ export default function Dashboard() {
                 <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                   {stories.filter(s=>s.brand===brand).map(story=>{
                     const color=bc(brand);
-                    const slots=[{key:"morning",label:"Morning",value:story.morning},{key:"midday",label:"Midday",value:story.midday},{key:"evening",label:"Evening",value:story.evening}];
+                    const slots=[
+                      {key:"slot1",label:"Slot 1",value:story.slot1||story.morning},
+                      {key:"slot2",label:"Slot 2",value:story.slot2||story.midday},
+                      {key:"slot3",label:"Slot 3",value:story.slot3||story.evening},
+                      {key:"slot4",label:"Slot 4",value:story.slot4},
+                      {key:"slot5",label:"Slot 5",value:story.slot5},
+                      {key:"slot6",label:"Slot 6",value:story.slot6}];
                     const doneCount=slots.filter(s=>story[`${s.key}_status`]==="posted").length;
                     return (
                       <div key={story.id} style={{ background:doneCount===3?`${color}08`:CARD, border:`1px solid ${doneCount>0?color+"44":BORDER}`, borderLeft:`4px solid ${doneCount===3?color:doneCount>0?color+"88":BORDER}`, borderRadius:10, padding:"10px 12px" }}>
@@ -1422,7 +1427,7 @@ export default function Dashboard() {
                           </div>
                           <div style={{ flex:1 }}>
                             <div style={{ display:"flex", gap:3 }}>{slots.map(s=><div key={s.key} style={{ width:8, height:8, borderRadius:"50%", background:story[`${s.key}_status`]==="posted"?color:BORDER }}/>)}</div>
-                            <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", marginTop:2 }}>{doneCount}/3 posted</div>
+                            <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", marginTop:2 }}>{doneCount}/6 posted</div>
                           </div>
                           <button onClick={()=>handleDeleteStory(story.id)} style={{ background:"none", border:"none", color:MUTED, cursor:"pointer", fontSize:11, padding:4 }}>✕</button>
                         </div>
