@@ -380,14 +380,17 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, onEditSt
 // ══════════════════════════════════════════════════════════════
 function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving }) {
   const m = useIsMobile();
+  const [expandedSeries, setExpandedSeries] = useState(null);
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
       {series.map(s => {
         const brands  = s.brand==="Both" ? ["franz","tgc"] : [s.brand.toLowerCase()];
+        // Show ALL reels matching this series (with or without date)
         const episodes = brands
-          .flatMap(b => reels.filter(r => r.brand===b && r.type==="SERIES" && r.series_id===s.id).map(r => ({...r,b})))
-          .sort((a,b) => a.date.localeCompare(b.date));
+          .flatMap(b => reels.filter(r => r.brand===b && (r.type==="SERIES" || r.series_id===s.id)).filter(r => r.series_id===s.id).map(r => ({...r,b})))
+          .sort((a,b) => (a.part||0) - (b.part||0));
+        const isExpanded = expandedSeries === s.id;
 
         const posted   = episodes.filter(e => e.status==="posted").length;
         const filmed   = episodes.filter(e => e.status==="filmed").length;
@@ -400,16 +403,22 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving }) {
         const ampel    = nextEp ? deadlineColor(nextDays) : GREEN;
 
         return (
-          <div key={s.id} style={{ background:CARD, border:`1px solid ${BORDER}`, borderLeft:`4px solid ${s.color}`, borderRadius:14, padding:m?14:22, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+          <div key={s.id} 
+            onClick={() => setExpandedSeries(isExpanded ? null : s.id)}
+            style={{ background:CARD, border:`1px solid ${isExpanded?s.color:BORDER}`, borderLeft:`4px solid ${s.color}`, borderRadius:14, padding:m?14:22, boxShadow:isExpanded?`0 4px 16px ${s.color}22`:"0 1px 4px rgba(0,0,0,0.06)", cursor:"pointer", transition:"all 0.2s" }}>
 
             {/* Series Header */}
             <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:14 }}>
               <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:9, color:s.color, fontFamily:"monospace", letterSpacing:"2px", marginBottom:3, fontWeight:700 }}>{s.brand.toUpperCase()}</div>
+                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:3 }}>
+                  <div style={{ fontSize:9, color:s.color, fontFamily:"monospace", letterSpacing:"2px", fontWeight:700 }}>{s.brand.toUpperCase()}</div>
+                  <span style={{ fontSize:14, color:s.color }}>{isExpanded ? "▼" : "▶"}</span>
+                </div>
                 <div style={{ fontSize:m?15:18, fontWeight:700, color:TEXT }}>{s.name}</div>
                 <div style={{ fontSize:11, color:MUTED, fontFamily:"monospace", marginTop:3 }}>
                   {posted} posted · {filmed} filmed · {planned} planned · {s.parts} total
                 </div>
+                {!isExpanded && episodes.length > 0 && <div style={{ fontSize:9, color:s.color, fontFamily:"monospace", marginTop:6, letterSpacing:"1px" }}>TAP TO VIEW ALL {episodes.length} EPISODES →</div>}
               </div>
               {/* Ampel */}
               {nextEp && (
@@ -434,13 +443,13 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving }) {
               </div>
             </div>
 
-            {/* Episodes */}
-            <div style={{ display:"grid", gridTemplateColumns:m?"1fr":"1fr 1fr", gap:8 }}>
+            {/* Episodes — only shown when expanded */}
+            {isExpanded && <div style={{ display:"grid", gridTemplateColumns:m?"1fr":"1fr 1fr", gap:8 }}>
               {episodes.map((ep, i) => {
                 const days  = daysUntil(ep.date);
                 const dColor = ep.status==="posted" ? GREEN : deadlineColor(days);
                 return (
-                  <div key={i} onClick={() => onOpenReel(ep, ep.b)}
+                  <div key={i} onClick={(e) => { e.stopPropagation(); onOpenReel(ep, ep.b); }}
                     style={{ padding:"12px 14px", background:ep.status==="posted"?`${s.color}08`:SOFT, border:`1px solid ${ep.status==="posted"?s.color+"44":BORDER}`, borderRadius:10, cursor:"pointer", transition:"all 0.15s" }}
                     onMouseEnter={e => e.currentTarget.style.borderColor=s.color}
                     onMouseLeave={e => e.currentTarget.style.borderColor=ep.status==="posted"?s.color+"44":BORDER}>
@@ -472,9 +481,9 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving }) {
                   </div>
                 );
               })}
-            </div>
+            </div>}
 
-            {episodes.length === 0 && (
+            {isExpanded && episodes.length === 0 && (
               <div style={{ fontSize:12, color:MUTED, fontFamily:"monospace" }}>No episodes planned yet.</div>
             )}
           </div>
@@ -1044,11 +1053,13 @@ export default function Dashboard() {
   ];
 
   return (
-    <div style={{ minHeight:"100vh", background:BG, fontFamily:"'Georgia',serif", color:TEXT, paddingBottom:m?72:0 }}>
+    <div style={{ minHeight:"100dvh", background:BG, fontFamily:"'Georgia',serif", color:TEXT, paddingBottom:m?72:0 }}>
 
       {/* ── Modals ── */}
       {detailReel && (
-        <ReelDetail reel={detailReel.reel} brand={detailReel.brand} series={series}
+        <ReelDetail 
+          reel={reels.find(r => r.id === detailReel.reel.id) || detailReel.reel} 
+          brand={detailReel.brand} series={series}
           onClose={()=>setDetailReel(null)}
           onToggleStatus={handleToggleStatus}
           onSetStatus={handleSetStatus}
