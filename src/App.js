@@ -228,7 +228,7 @@ function Modal({ title, onClose, onSave, saving, children, wide }) {
 // ══════════════════════════════════════════════════════════════
 // HEUTE TAB
 // ══════════════════════════════════════════════════════════════
-function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, saving }) {
+function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, onEditStorySlot, onToggleStorySlot, saving }) {
   const m = useIsMobile();
   const todayStr = new Date().toISOString().split("T")[0];
 
@@ -301,7 +301,7 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, saving }
         </div>
       )}
 
-      {/* Heute Stories */}
+      {/* Today Stories — full interactive cards */}
       {todayStories.length > 0 && (
         <div style={{ marginBottom:14 }}>
           <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:8 }}>STORIES TODAY</div>
@@ -309,22 +309,39 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, saving }
             const color = bc(story.brand);
             const slots = [
               { key:"morning", label:"Morning", value:story.morning, status:story.morning_status },
-              { key:"midday",  label:"Midday", value:story.midday,  status:story.midday_status  },
-              { key:"evening", label:"Evening",  value:story.evening, status:story.evening_status },
+              { key:"midday",  label:"Midday",  value:story.midday,  status:story.midday_status  },
+              { key:"evening", label:"Evening", value:story.evening, status:story.evening_status },
             ];
+            const doneCount = slots.filter(s => s.status === "posted").length;
             return (
-              <div key={story.id} style={{ background:CARD, border:`1px solid ${BORDER}`, borderLeft:`4px solid ${color}`, borderRadius:12, padding:m?12:16, marginBottom:10 }}>
-                <div style={{ fontSize:10, color, fontFamily:"monospace", fontWeight:700, marginBottom:10 }}>{story.brand==="franz"?"FRANZ":"TGC"} STORIES</div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8 }}>
+              <div key={story.id} style={{ background:doneCount===3?`${color}08`:CARD, border:`1px solid ${doneCount>0?color+"44":BORDER}`, borderLeft:`4px solid ${doneCount===3?color:doneCount>0?color+"88":BORDER}`, borderRadius:12, padding:m?12:14, marginBottom:10 }}>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+                  <div style={{ fontSize:11, color, fontFamily:"monospace", fontWeight:700 }}>{story.brand==="franz"?"FRANZ":"TGC"} STORIES</div>
+                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                    <div style={{ display:"flex", gap:3 }}>
+                      {slots.map(s => <div key={s.key} style={{ width:8, height:8, borderRadius:"50%", background:s.status==="posted"?color:BORDER }}/>)}
+                    </div>
+                    <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", fontWeight:700 }}>{doneCount}/3</div>
+                  </div>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
                   {slots.map(slot => {
                     const done = slot.status==="posted";
                     return (
-                      <div key={slot.key} style={{ background:done?`${color}0F`:SOFT, border:`1px solid ${done?color+"55":BORDER}`, borderRadius:8, padding:"10px 8px" }}>
+                      <div key={slot.key}
+                        onClick={() => onEditStorySlot && onEditStorySlot(story.id, slot.key, slot.value)}
+                        style={{ background:done?`${color}0F`:SOFT, border:`1px solid ${done?color+"55":BORDER}`, borderRadius:8, padding:"10px 8px", cursor:"pointer", transition:"all 0.15s" }}
+                        onMouseEnter={e => e.currentTarget.style.borderColor=color}
+                        onMouseLeave={e => e.currentTarget.style.borderColor=done?color+"55":BORDER}>
                         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
                           <span style={{ fontSize:8, color:done?color:MUTED, fontFamily:"monospace", fontWeight:700 }}>{slot.label.toUpperCase()}</span>
-                          <div style={{ width:16, height:16, borderRadius:"50%", background:done?color:"transparent", border:`1.5px solid ${done?color:BORDER}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, color:"#fff" }}>{done?"✓":""}</div>
+                          <div onClick={e => { e.stopPropagation(); onToggleStorySlot && onToggleStorySlot(story.id, slot.key, slot.status); }}
+                            style={{ width:20, height:20, borderRadius:"50%", background:done?color:"transparent", border:`1.5px solid ${done?color:BORDER}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, color:"#fff", cursor:"pointer" }}>
+                            {done?"✓":""}
+                          </div>
                         </div>
                         <div style={{ fontSize:10, color:TEXT, lineHeight:1.4 }}>{slot.value}</div>
+                        <div style={{ marginTop:4, fontSize:8, color:done?color:MUTED, fontFamily:"monospace" }}>{done?"✓ posted":"tap to edit"}</div>
                       </div>
                     );
                   })}
@@ -338,7 +355,7 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, saving }
       {/* Morgen Preview */}
       {tomorrowReels.length > 0 && (
         <div>
-          <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:8 }}>MORGEN</div>
+          <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:8 }}>TOMORROW</div>
           {tomorrowReels.map(reel => {
             const color = bc(reel.brand);
             return (
@@ -567,75 +584,202 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
 // ══════════════════════════════════════════════════════════════
 function CalendarGrid({ reels, stories, onDayClick }) {
   const m = useIsMobile(), now = new Date();
-  const [vY, setVY] = useState(2026), [vM, setVM] = useState(3);
+  const [vY, setVY] = useState(now.getFullYear()), [vM, setVM] = useState(now.getMonth());
+  const [viewMode, setViewMode] = useState("week"); // "week" or "month"
+  const [weekStart, setWeekStart] = useState(() => {
+    // Start of current week (Monday)
+    const d = new Date();
+    const day = d.getDay();
+    const diff = day === 0 ? -6 : 1 - day; // adjust to Monday
+    d.setDate(d.getDate() + diff);
+    d.setHours(0,0,0,0);
+    return d;
+  });
+
   const days = getDaysInMonth(vY, vM), sd = getStartDay(vY, vM);
   const tod  = now.getFullYear()===vY && now.getMonth()===vM ? now.getDate() : null;
   const pm   = () => { if(vM===0){setVM(11);setVY(y=>y-1);}else setVM(v=>v-1); };
   const nm   = () => { if(vM===11){setVM(0);setVY(y=>y+1);}else setVM(v=>v+1); };
   const ds   = (d) => `${vY}-${String(vM+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
 
+  // Week navigation
+  const prevWeek = () => { const d = new Date(weekStart); d.setDate(d.getDate()-7); setWeekStart(d); };
+  const nextWeek = () => { const d = new Date(weekStart); d.setDate(d.getDate()+7); setWeekStart(d); };
+  const formatDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+
+  // Get 7 days starting from weekStart
+  const weekDays = Array.from({length:7}, (_,i) => { const d = new Date(weekStart); d.setDate(d.getDate()+i); return d; });
+  const weekRange = `${weekDays[0].getDate()} ${MONTH_NAMES[weekDays[0].getMonth()].slice(0,3)} – ${weekDays[6].getDate()} ${MONTH_NAMES[weekDays[6].getMonth()].slice(0,3)}`;
+  const weekHeaderMonth = `${MONTH_NAMES[weekDays[0].getMonth()]} ${weekDays[0].getFullYear()}`;
+
+  // Helper to get day data
+  const dayData = (date) => {
+    const dStr = typeof date === "string" ? date : formatDateStr(date);
+    const fR = reels.filter(r => r.brand==="franz" && r.date===dStr);
+    const tR = reels.filter(r => r.brand==="tgc"   && r.date===dStr);
+    const fS = stories.filter(s => s.brand==="franz" && s.date===dStr);
+    const tS = stories.filter(s => s.brand==="tgc"   && s.date===dStr);
+    const fRd = fR.some(r => r.status==="posted");
+    const tRd = tR.some(r => r.status==="posted");
+    const fRf = fR.some(r => r.status==="filmed");
+    const tRf = tR.some(r => r.status==="filmed");
+    const fSd = fS.reduce((n,s) => n+["morning","midday","evening"].filter(sl=>s[`${sl}_status`]==="posted").length, 0);
+    const tSd = tS.reduce((n,s) => n+["morning","midday","evening"].filter(sl=>s[`${sl}_status`]==="posted").length, 0);
+    return { fR, tR, fS, tS, fRd, tRd, fRf, tRf, fSd, tSd };
+  };
+
   return (
     <div>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
-        <button onClick={pm} style={{ background:"none", border:`1px solid ${BORDER}`, borderRadius:8, width:40, height:40, cursor:"pointer", color:MUTED, fontSize:20, display:"flex", alignItems:"center", justifyContent:"center" }} onMouseEnter={e=>e.currentTarget.style.borderColor="#999"} onMouseLeave={e=>e.currentTarget.style.borderColor=BORDER}>‹</button>
-        <div style={{ textAlign:"center" }}>
-          <div style={{ fontSize:m?16:18, fontWeight:700, color:TEXT }}>{MONTH_NAMES[vM]} {vY}</div>
-          {!m && <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace" }}>Click any day to see details</div>}
-        </div>
-        <button onClick={nm} style={{ background:"none", border:`1px solid ${BORDER}`, borderRadius:8, width:40, height:40, cursor:"pointer", color:MUTED, fontSize:20, display:"flex", alignItems:"center", justifyContent:"center" }} onMouseEnter={e=>e.currentTarget.style.borderColor="#999"} onMouseLeave={e=>e.currentTarget.style.borderColor=BORDER}>›</button>
+      {/* View Mode Toggle */}
+      <div style={{ display:"flex", justifyContent:"center", marginBottom:14, gap:4 }}>
+        <button onClick={()=>setViewMode("week")} style={{ padding:"8px 18px", borderRadius:8, border:`1px solid ${viewMode==="week"?TEXT:BORDER}`, background:viewMode==="week"?TEXT:"transparent", color:viewMode==="week"?BG:MUTED, fontSize:11, fontFamily:"monospace", letterSpacing:"1px", cursor:"pointer", fontWeight:viewMode==="week"?700:400, minHeight:40 }}>WEEK</button>
+        <button onClick={()=>setViewMode("month")} style={{ padding:"8px 18px", borderRadius:8, border:`1px solid ${viewMode==="month"?TEXT:BORDER}`, background:viewMode==="month"?TEXT:"transparent", color:viewMode==="month"?BG:MUTED, fontSize:11, fontFamily:"monospace", letterSpacing:"1px", cursor:"pointer", fontWeight:viewMode==="month"?700:400, minHeight:40 }}>MONTH</button>
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:m?2:4, marginBottom:m?2:4 }}>
-        {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => <div key={d} style={{ textAlign:"center", fontSize:m?8:10, color:MUTED, fontFamily:"monospace", padding:"3px 0" }}>{d}</div>)}
-      </div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:m?2:4 }}>
-        {Array.from({length:sd}).map((_,i) => <div key={`e${i}`}/>)}
-        {Array.from({length:days}).map((_,i) => {
-          const day  = i+1, date = ds(day);
-          const fR   = reels.filter(r => r.brand==="franz" && r.date===date);
-          const tR   = reels.filter(r => r.brand==="tgc"   && r.date===date);
-          const fS   = stories.filter(s => s.brand==="franz" && s.date===date);
-          const tS   = stories.filter(s => s.brand==="tgc"   && s.date===date);
-          const fRd  = fR.some(r => r.status==="posted");
-          const tRd  = tR.some(r => r.status==="posted");
-          const fRf  = fR.some(r => r.status==="filmed");
-          const tRf  = tR.some(r => r.status==="filmed");
-          const fSd  = fS.reduce((n,s) => n+["morning","midday","evening"].filter(sl=>s[`${sl}_status`]==="posted").length, 0);
-          const tSd  = tS.reduce((n,s) => n+["morning","midday","evening"].filter(sl=>s[`${sl}_status`]==="posted").length, 0);
-          const isT  = day===tod;
 
-          // Dot color based on status
-          const fDot = fRd ? FRANZ : fRf ? AMBER : fR.length>0 ? `${FRANZ}44` : null;
-          const tDot = tRd ? TGC   : tRf ? AMBER : tR.length>0 ? `${TGC}44`   : null;
-
-          return (
-            <div key={day} onClick={() => onDayClick(day, vY, vM)}
-              style={{ minHeight:m?52:72, borderRadius:m?6:8, padding:m?"4px":"6px 7px", background:isT?`${FRANZ}11`:CARD, border:`1px solid ${isT?FRANZ:BORDER}`, cursor:"pointer", transition:"all 0.15s", boxShadow:(fR.length>0||tR.length>0)?"0 1px 3px rgba(0,0,0,0.05)":"none" }}
-              onMouseEnter={e => e.currentTarget.style.borderColor="#999"}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = isT?FRANZ:BORDER; }}>
-              <div style={{ fontSize:m?11:12, fontWeight:isT?700:500, color:isT?FRANZ:TEXT, marginBottom:m?3:4, fontFamily:"monospace" }}>{day}</div>
-              {/* Franz indicator — pill with reel + stories count */}
-              {(fR.length>0 || fS.length>0) && (
-                <div style={{ display:"flex", alignItems:"center", gap:3, marginBottom:m?3:4, padding:m?"2px 4px":"3px 5px", background:`${FRANZ}15`, borderRadius:m?4:6, border:`1px solid ${fRd?FRANZ:FRANZ+"44"}` }}>
-                  {fR.length>0 && <div style={{ width:m?6:7, height:m?6:7, borderRadius:"50%", background:fDot, flexShrink:0 }}/>}
-                  {!m && fR[0] && <div style={{ fontSize:9, color:fRd?FRANZ:MUTED, fontFamily:"monospace", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>F · {fR[0]?.title.slice(0,12)}</div>}
-                  {m && fR.length>0 && <span style={{ fontSize:7, color:fRd?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700 }}>F</span>}
-                  {fS.length>0 && <span style={{ fontSize:m?7:8, color:fSd>0?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700, marginLeft:"auto" }}>{fSd}/3</span>}
-                </div>
-              )}
-              {/* TGC indicator — pill with reel + stories count */}
-              {(tR.length>0 || tS.length>0) && (
-                <div style={{ display:"flex", alignItems:"center", gap:3, marginBottom:m?2:3, padding:m?"2px 4px":"3px 5px", background:`${TGC}15`, borderRadius:m?4:6, border:`1px solid ${tRd?TGC:TGC+"44"}` }}>
-                  {tR.length>0 && <div style={{ width:m?6:7, height:m?6:7, borderRadius:"50%", background:tDot, flexShrink:0 }}/>}
-                  {!m && tR[0] && <div style={{ fontSize:9, color:tRd?TGC:MUTED, fontFamily:"monospace", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>T · {tR[0]?.title.slice(0,12)}</div>}
-                  {m && tR.length>0 && <span style={{ fontSize:7, color:tRd?TGC:MUTED, fontFamily:"monospace", fontWeight:700 }}>T</span>}
-                  {tS.length>0 && <span style={{ fontSize:m?7:8, color:tSd>0?TGC:MUTED, fontFamily:"monospace", fontWeight:700, marginLeft:"auto" }}>{tSd}/3</span>}
-                </div>
-              )}
+      {viewMode === "week" ? (
+        <>
+          {/* Week View Header */}
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+            <button onClick={prevWeek} style={{ background:"none", border:`1px solid ${BORDER}`, borderRadius:8, width:44, height:44, cursor:"pointer", color:MUTED, fontSize:22, display:"flex", alignItems:"center", justifyContent:"center" }}>‹</button>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:m?11:13, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:2 }}>{weekHeaderMonth.toUpperCase()}</div>
+              <div style={{ fontSize:m?16:18, fontWeight:700, color:TEXT }}>{weekRange}</div>
             </div>
-          );
-        })}
-      </div>
-      <div style={{ display:"flex", gap:m?10:16, marginTop:12, flexWrap:"wrap" }}>
+            <button onClick={nextWeek} style={{ background:"none", border:`1px solid ${BORDER}`, borderRadius:8, width:44, height:44, cursor:"pointer", color:MUTED, fontSize:22, display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
+          </div>
+
+          {/* Week Day Cards — vertical list */}
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {weekDays.map((d) => {
+              const dStr = formatDateStr(d);
+              const data = dayData(dStr);
+              const isToday = formatDateStr(now) === dStr;
+              const dayName = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()];
+              const totalReels = data.fR.length + data.tR.length;
+              const totalStoriesPosted = data.fSd + data.tSd;
+              const totalStoriesPlanned = (data.fS.length>0?3:0) + (data.tS.length>0?3:0);
+
+              return (
+                <div key={dStr} onClick={() => onDayClick(d.getDate(), d.getFullYear(), d.getMonth())}
+                  style={{ background:isToday?`${FRANZ}08`:CARD, border:`1px solid ${isToday?FRANZ:BORDER}`, borderRadius:12, padding:m?12:14, cursor:"pointer", transition:"all 0.15s" }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor="#999"}
+                  onMouseLeave={e => e.currentTarget.style.borderColor=isToday?FRANZ:BORDER}>
+                  {/* Day Header */}
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:totalReels>0||totalStoriesPlanned>0?10:0 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                      <div style={{ width:m?40:48, textAlign:"center" }}>
+                        <div style={{ fontSize:9, color:isToday?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700, marginBottom:2 }}>{dayName.toUpperCase()}</div>
+                        <div style={{ fontSize:m?20:24, fontWeight:700, color:isToday?FRANZ:TEXT, lineHeight:1 }}>{d.getDate()}</div>
+                      </div>
+                      {isToday && <div style={{ padding:"3px 8px", borderRadius:4, background:FRANZ, fontSize:9, color:"#fff", fontFamily:"monospace", fontWeight:700, letterSpacing:"1px" }}>TODAY</div>}
+                    </div>
+                    {totalReels===0 && totalStoriesPlanned===0 && (
+                      <span style={{ fontSize:10, color:MUTED, fontFamily:"monospace", fontStyle:"italic" }}>No content planned</span>
+                    )}
+                  </div>
+
+                  {/* Franz Row */}
+                  {(data.fR.length>0 || data.fS.length>0) && (
+                    <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", background:`${FRANZ}0A`, border:`1px solid ${FRANZ}33`, borderRadius:8, marginBottom:6 }}>
+                      <div style={{ fontSize:9, color:FRANZ, fontFamily:"monospace", fontWeight:700, width:m?42:50, flexShrink:0 }}>FRANZ</div>
+                      {data.fR.length>0 ? (
+                        <div style={{ display:"flex", alignItems:"center", gap:5, flex:1, minWidth:0 }}>
+                          <div style={{ width:8, height:8, borderRadius:"50%", background:data.fRd?FRANZ:data.fRf?AMBER:`${FRANZ}55`, flexShrink:0 }}/>
+                          <span style={{ fontSize:m?11:12, color:data.fRd?FRANZ:TEXT, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>{data.fR[0]?.title}</span>
+                          <span style={{ fontSize:9, color:data.fRd?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700, flexShrink:0 }}>{data.fRd?"✓":data.fRf?"FILMED":"PLANNED"}</span>
+                        </div>
+                      ) : <div style={{ flex:1, fontSize:10, color:MUTED, fontStyle:"italic" }}>No reel</div>}
+                      {data.fS.length>0 && (
+                        <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
+                          <span style={{ fontSize:10, color:data.fSd>0?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700 }}>{data.fSd}/3</span>
+                          <div style={{ display:"flex", gap:2 }}>
+                            {[0,1,2].map(i => <div key={i} style={{ width:5, height:5, borderRadius:"50%", background:i<data.fSd?FRANZ:`${FRANZ}33` }}/>)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TGC Row */}
+                  {(data.tR.length>0 || data.tS.length>0) && (
+                    <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", background:`${TGC}0A`, border:`1px solid ${TGC}33`, borderRadius:8 }}>
+                      <div style={{ fontSize:9, color:TGC, fontFamily:"monospace", fontWeight:700, width:m?42:50, flexShrink:0 }}>TGC</div>
+                      {data.tR.length>0 ? (
+                        <div style={{ display:"flex", alignItems:"center", gap:5, flex:1, minWidth:0 }}>
+                          <div style={{ width:8, height:8, borderRadius:"50%", background:data.tRd?TGC:data.tRf?AMBER:`${TGC}55`, flexShrink:0 }}/>
+                          <span style={{ fontSize:m?11:12, color:data.tRd?TGC:TEXT, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>{data.tR[0]?.title}</span>
+                          <span style={{ fontSize:9, color:data.tRd?TGC:MUTED, fontFamily:"monospace", fontWeight:700, flexShrink:0 }}>{data.tRd?"✓":data.tRf?"FILMED":"PLANNED"}</span>
+                        </div>
+                      ) : <div style={{ flex:1, fontSize:10, color:MUTED, fontStyle:"italic" }}>No reel</div>}
+                      {data.tS.length>0 && (
+                        <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
+                          <span style={{ fontSize:10, color:data.tSd>0?TGC:MUTED, fontFamily:"monospace", fontWeight:700 }}>{data.tSd}/3</span>
+                          <div style={{ display:"flex", gap:2 }}>
+                            {[0,1,2].map(i => <div key={i} style={{ width:5, height:5, borderRadius:"50%", background:i<data.tSd?TGC:`${TGC}33` }}/>)}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Month View Header */}
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+            <button onClick={pm} style={{ background:"none", border:`1px solid ${BORDER}`, borderRadius:8, width:44, height:44, cursor:"pointer", color:MUTED, fontSize:22, display:"flex", alignItems:"center", justifyContent:"center" }}>‹</button>
+            <div style={{ textAlign:"center" }}>
+              <div style={{ fontSize:m?16:18, fontWeight:700, color:TEXT }}>{MONTH_NAMES[vM]} {vY}</div>
+              {!m && <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace" }}>Click any day to see details</div>}
+            </div>
+            <button onClick={nm} style={{ background:"none", border:`1px solid ${BORDER}`, borderRadius:8, width:44, height:44, cursor:"pointer", color:MUTED, fontSize:22, display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
+          </div>
+
+          {/* Month grid */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:m?2:4, marginBottom:m?2:4 }}>
+            {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => <div key={d} style={{ textAlign:"center", fontSize:m?8:10, color:MUTED, fontFamily:"monospace", padding:"3px 0" }}>{d}</div>)}
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:m?2:4 }}>
+            {Array.from({length:sd}).map((_,i) => <div key={`e${i}`}/>)}
+            {Array.from({length:days}).map((_,i) => {
+              const day  = i+1, date = ds(day);
+              const data = dayData(date);
+              const isT  = day===tod;
+              const fDot = data.fRd ? FRANZ : data.fRf ? AMBER : data.fR.length>0 ? `${FRANZ}44` : null;
+              const tDot = data.tRd ? TGC   : data.tRf ? AMBER : data.tR.length>0 ? `${TGC}44`   : null;
+
+              return (
+                <div key={day} onClick={() => onDayClick(day, vY, vM)}
+                  style={{ minHeight:m?60:78, borderRadius:m?6:8, padding:m?"4px":"6px 7px", background:isT?`${FRANZ}11`:CARD, border:`1px solid ${isT?FRANZ:BORDER}`, cursor:"pointer", transition:"all 0.15s" }}>
+                  <div style={{ fontSize:m?11:12, fontWeight:isT?700:500, color:isT?FRANZ:TEXT, marginBottom:m?3:4, fontFamily:"monospace" }}>{day}</div>
+                  {(data.fR.length>0 || data.fS.length>0) && (
+                    <div style={{ display:"flex", alignItems:"center", gap:3, marginBottom:m?3:4, padding:m?"2px 4px":"3px 5px", background:`${FRANZ}15`, borderRadius:m?4:6, border:`1px solid ${data.fRd?FRANZ:FRANZ+"44"}` }}>
+                      {data.fR.length>0 && <div style={{ width:m?6:7, height:m?6:7, borderRadius:"50%", background:fDot, flexShrink:0 }}/>}
+                      {!m && data.fR[0] && <div style={{ fontSize:9, color:data.fRd?FRANZ:MUTED, fontFamily:"monospace", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>F · {data.fR[0]?.title.slice(0,12)}</div>}
+                      {m && data.fR.length>0 && <span style={{ fontSize:7, color:data.fRd?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700 }}>F</span>}
+                      {data.fS.length>0 && <span style={{ fontSize:m?7:8, color:data.fSd>0?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700, marginLeft:"auto" }}>{data.fSd}/3</span>}
+                    </div>
+                  )}
+                  {(data.tR.length>0 || data.tS.length>0) && (
+                    <div style={{ display:"flex", alignItems:"center", gap:3, marginBottom:m?2:3, padding:m?"2px 4px":"3px 5px", background:`${TGC}15`, borderRadius:m?4:6, border:`1px solid ${data.tRd?TGC:TGC+"44"}` }}>
+                      {data.tR.length>0 && <div style={{ width:m?6:7, height:m?6:7, borderRadius:"50%", background:tDot, flexShrink:0 }}/>}
+                      {!m && data.tR[0] && <div style={{ fontSize:9, color:data.tRd?TGC:MUTED, fontFamily:"monospace", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>T · {data.tR[0]?.title.slice(0,12)}</div>}
+                      {m && data.tR.length>0 && <span style={{ fontSize:7, color:data.tRd?TGC:MUTED, fontFamily:"monospace", fontWeight:700 }}>T</span>}
+                      {data.tS.length>0 && <span style={{ fontSize:m?7:8, color:data.tSd>0?TGC:MUTED, fontFamily:"monospace", fontWeight:700, marginLeft:"auto" }}>{data.tSd}/3</span>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* Legend */}
+      <div style={{ display:"flex", gap:m?10:16, marginTop:14, flexWrap:"wrap", justifyContent:"center" }}>
         {[{color:FRANZ,label:"Franz posted"},{color:AMBER,label:"Filmed"},{color:MUTED,label:"Planned"},{color:TGC,label:"TGC posted"}].map(l => (
           <div key={l.label} style={{ display:"flex", alignItems:"center", gap:5 }}>
             <div style={{ width:7, height:7, borderRadius:"50%", background:l.color }}/><span style={{ fontSize:9, color:MUTED, fontFamily:"monospace" }}>{l.label}</span>
@@ -763,12 +907,15 @@ export default function Dashboard() {
   };
   // ── Set status directly to a specific value ──
   const handleSetStatus = async (id, newStatus) => {
-    const prev = reels.find(r => r.id === id)?.status;
-    setReels(prev => prev.map(r => r.id===id ? {...r, status:newStatus} : r));
+    const oldStatus = reels.find(r => r.id === id)?.status;
+    if (oldStatus === newStatus) return;
+    // Optimistic UI update
+    setReels(prevList => prevList.map(r => r.id===id ? {...r, status:newStatus} : r));
     try {
       await updateReelStatus(id, newStatus);
     } catch (e) {
-      setReels(prevReels => prevReels.map(r => r.id===id ? {...r, status:prev} : r));
+      // Revert on error
+      setReels(prevList => prevList.map(r => r.id===id ? {...r, status:oldStatus} : r));
       setError("Status update failed: " + e.message);
     }
   };
@@ -1017,6 +1164,8 @@ export default function Dashboard() {
               <TodayTab reels={reels} stories={stories} series={series}
                 onToggleStatus={handleToggleStatus}
                 onOpenReel={(reel,brand)=>setDetailReel({reel,brand})}
+                onEditStorySlot={(id, slot, value)=>{ setEditSlot({id,slot}); setEditVal(value); }}
+                onToggleStorySlot={handleToggleStory}
                 saving={saving}/>
             )}
 
