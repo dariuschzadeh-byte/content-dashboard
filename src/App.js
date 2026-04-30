@@ -231,130 +231,186 @@ function Modal({ title, onClose, onSave, saving, children, wide }) {
 function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, onEditStorySlot, onToggleStorySlot, saving }) {
   const m = useIsMobile();
   const todayStr = new Date().toISOString().split("T")[0];
+  const [expanded, setExpanded] = useState(null); // "franz-reel" | "tgc-reel" | "franz-stories" | "tgc-stories" | null
 
-  const todayReels   = reels.filter(r => r.date === todayStr);
-  const todayStories = stories.filter(s => s.date === todayStr);
+  const franzReels = reels.filter(r => r.date === todayStr && r.brand === "franz");
+  const tgcReels   = reels.filter(r => r.date === todayStr && r.brand === "tgc");
+  const franzStories = stories.filter(s => s.date === todayStr && s.brand === "franz");
+  const tgcStories   = stories.filter(s => s.date === todayStr && s.brand === "tgc");
+
   const tomorrow     = new Date(); tomorrow.setDate(tomorrow.getDate()+1);
   const tomorrowStr  = tomorrow.toISOString().split("T")[0];
   const tomorrowReels = reels.filter(r => r.date === tomorrowStr);
 
-  const allDone = todayReels.length > 0 && todayReels.every(r => r.status === "posted");
+  // KPIs per brand
+  const franzReelsPosted = franzReels.filter(r => r.status === "posted").length;
+  const franzReelsTotal  = franzReels.length;
+  const tgcReelsPosted   = tgcReels.filter(r => r.status === "posted").length;
+  const tgcReelsTotal    = tgcReels.length;
+
+  const countStoriesPosted = (storiesArr) =>
+    storiesArr.reduce((n,s) => n + ["morning","midday","evening"].filter(sl => s[`${sl}_status`] === "posted").length, 0);
+  const countStoriesTotal = (storiesArr) =>
+    storiesArr.reduce((n,s) => n + ["morning","midday","evening"].filter(sl => s[sl]).length, 0);
+
+  const franzStoriesPosted = countStoriesPosted(franzStories);
+  const franzStoriesTotal  = countStoriesTotal(franzStories) || (franzStories.length * 3);
+  const tgcStoriesPosted   = countStoriesPosted(tgcStories);
+  const tgcStoriesTotal    = countStoriesTotal(tgcStories) || (tgcStories.length * 3);
+
+  const totalPosted = franzReelsPosted + tgcReelsPosted + franzStoriesPosted + tgcStoriesPosted;
+  const totalToPost = franzReelsTotal + tgcReelsTotal + franzStoriesTotal + tgcStoriesTotal;
+  const allDone = totalToPost > 0 && totalPosted === totalToPost;
+
+  // KPI Card component
+  const KpiCard = ({ id, brand, type, label, posted, total, color, hasContent }) => {
+    const isExpanded = expanded === id;
+    const isComplete = total > 0 && posted === total;
+    const hasNothing = total === 0;
+    return (
+      <div style={{ marginBottom:10 }}>
+        <div onClick={() => !hasNothing && setExpanded(isExpanded ? null : id)}
+          style={{ 
+            background: isComplete ? `${color}0F` : CARD, 
+            border:`1px solid ${isComplete ? color+"66" : isExpanded ? color : BORDER}`, 
+            borderLeft:`4px solid ${isComplete ? color : posted > 0 ? color+"AA" : color+"55"}`, 
+            borderRadius:12, 
+            padding:m?"14px 14px":"16px 18px", 
+            cursor: hasNothing ? "default" : "pointer", 
+            transition:"all 0.2s",
+            opacity: hasNothing ? 0.5 : 1,
+            boxShadow: isExpanded ? `0 4px 16px ${color}22` : "0 1px 4px rgba(0,0,0,0.04)"
+          }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:9, color, fontFamily:"monospace", letterSpacing:"2px", fontWeight:700, marginBottom:3 }}>
+                {brand.toUpperCase()} {type.toUpperCase()}
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <div style={{ fontSize:m?20:24, fontWeight:700, color:isComplete ? color : TEXT, lineHeight:1 }}>
+                  {posted}<span style={{ fontSize:m?13:15, color:MUTED, fontWeight:400 }}>/{total}</span>
+                </div>
+                <div style={{ fontSize:11, color:MUTED, fontFamily:"monospace" }}>{type === "reel" ? "reel" : "stories"} posted</div>
+              </div>
+            </div>
+            {!hasNothing && (
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                {isComplete && <span style={{ fontSize:18 }}>✓</span>}
+                <span style={{ fontSize:18, color, transform: isExpanded ? "rotate(90deg)" : "none", transition:"transform 0.2s" }}>›</span>
+              </div>
+            )}
+          </div>
+        </div>
+        {isExpanded && (
+          <div style={{ marginTop:6 }}>{renderExpandedContent(id)}</div>
+        )}
+      </div>
+    );
+  };
+
+  const renderExpandedContent = (id) => {
+    if (id === "franz-reel" || id === "tgc-reel") {
+      const reelsToShow = id === "franz-reel" ? franzReels : tgcReels;
+      const color = id === "franz-reel" ? FRANZ : TGC;
+      return reelsToShow.map(reel => {
+        const sObj = reel.type === "SERIES" ? series.find(s => s.id === reel.series_id) : null;
+        return (
+          <div key={reel.id} onClick={() => onOpenReel(reel, reel.brand)}
+            style={{ background:CARD, border:`1px solid ${BORDER}`, borderLeft:`4px solid ${color}`, borderRadius:12, padding:m?14:18, marginBottom:8, cursor:"pointer", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, flexWrap:"wrap" }}>
+              {sObj && <div style={{ padding:"3px 10px", borderRadius:4, background:`${sObj.color}11`, border:`1px solid ${sObj.color}33`, fontSize:10, fontFamily:"monospace", color:sObj.color }}>{sObj.name} · Pt {reel.part}</div>}
+              <div onClick={e => e.stopPropagation()}>
+                <StatusBadge status={reel.status} onClick={() => onToggleStatus(reel.id, reel.status)} disabled={saving}/>
+              </div>
+            </div>
+            <div style={{ fontSize:m?16:18, fontWeight:700, color:TEXT, marginBottom:6 }}>{reel.title}</div>
+            {reel.hook && (
+              <div style={{ padding:"10px 14px", background:`${color}08`, border:`1px solid ${color}22`, borderRadius:8, marginBottom:8 }}>
+                <div style={{ fontSize:9, color, fontFamily:"monospace", letterSpacing:"1.5px", marginBottom:3 }}>HOOK — FIRST 2 SECONDS</div>
+                <div style={{ fontSize:14, color:TEXT, fontStyle:"italic" }}>"{reel.hook}"</div>
+              </div>
+            )}
+            {reel.caption && <div style={{ fontSize:12, color:MUTED, fontStyle:"italic", marginBottom:8 }}>Caption: "{reel.caption}"</div>}
+            <div style={{ fontSize:9, color:MUTED, fontFamily:"monospace", letterSpacing:"1px" }}>TAP CARD FOR FULL DETAILS →</div>
+          </div>
+        );
+      });
+    }
+    if (id === "franz-stories" || id === "tgc-stories") {
+      const storiesToShow = id === "franz-stories" ? franzStories : tgcStories;
+      const color = id === "franz-stories" ? FRANZ : TGC;
+      return storiesToShow.map(story => {
+        const slots = [
+          { key:"morning", label:"Morning", value:story.morning, status:story.morning_status },
+          { key:"midday",  label:"Midday",  value:story.midday,  status:story.midday_status  },
+          { key:"evening", label:"Evening", value:story.evening, status:story.evening_status },
+        ];
+        return (
+          <div key={story.id} style={{ background:CARD, border:`1px solid ${BORDER}`, borderLeft:`4px solid ${color}`, borderRadius:12, padding:m?12:14, marginBottom:8 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
+              {slots.map(slot => {
+                const done = slot.status==="posted";
+                return (
+                  <div key={slot.key}
+                    onClick={() => onEditStorySlot && onEditStorySlot(story.id, slot.key, slot.value)}
+                    style={{ background:done?`${color}0F`:SOFT, border:`1px solid ${done?color+"55":BORDER}`, borderRadius:8, padding:"10px 8px", cursor:"pointer", minHeight:90 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
+                      <span style={{ fontSize:8, color:done?color:MUTED, fontFamily:"monospace", fontWeight:700 }}>{slot.label.toUpperCase()}</span>
+                      <div onClick={e => { e.stopPropagation(); onToggleStorySlot && onToggleStorySlot(story.id, slot.key, slot.status); }}
+                        style={{ width:20, height:20, borderRadius:"50%", background:done?color:"transparent", border:`1.5px solid ${done?color:BORDER}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, color:"#fff", cursor:"pointer", flexShrink:0 }}>
+                        {done?"✓":""}
+                      </div>
+                    </div>
+                    <div style={{ fontSize:10, color:TEXT, lineHeight:1.4 }}>{slot.value || "—"}</div>
+                    <div style={{ marginTop:5, fontSize:8, color:done?color:MUTED, fontFamily:"monospace" }}>{done?"✓ posted":"tap to edit"}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      });
+    }
+    return null;
+  };
 
   return (
     <div>
       {/* Header */}
-      <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14, padding:m?14:20, marginBottom:14, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+      <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14, padding:m?14:20, marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
         <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:4 }}>TODAY</div>
         <div style={{ fontSize:m?20:26, fontWeight:700, color:TEXT }}>
           {new Date().toLocaleDateString("en-GB", { weekday:"long", day:"numeric", month:"long" })}
         </div>
+        {totalToPost > 0 && (
+          <div style={{ marginTop:10, fontSize:13, color:MUTED, fontFamily:"monospace" }}>
+            <span style={{ color:allDone?GREEN:TEXT, fontWeight:700 }}>{totalPosted}</span>/{totalToPost} done
+          </div>
+        )}
         {allDone && (
           <div style={{ marginTop:10, padding:"8px 14px", background:`${GREEN}11`, border:`1px solid ${GREEN}33`, borderRadius:8, display:"inline-flex", alignItems:"center", gap:8 }}>
             <span style={{ fontSize:16 }}>✅</span>
             <span style={{ fontSize:12, color:GREEN, fontFamily:"monospace", fontWeight:700 }}>Everything posted today!</span>
           </div>
         )}
-        {todayReels.length === 0 && (
+        {totalToPost === 0 && (
           <div style={{ marginTop:10, fontSize:13, color:MUTED, fontFamily:"monospace" }}>No content planned for today.</div>
         )}
       </div>
 
-      {/* Heute Reels */}
-      {todayReels.length > 0 && (
-        <div style={{ marginBottom:14 }}>
-          <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:8 }}>TO POST TODAY</div>
-          {todayReels.map(reel => {
-            const color = bc(reel.brand);
-            const sObj  = reel.type==="SERIES" ? series.find(s=>s.id===reel.series_id) : null;
-            return (
-              <div key={reel.id} onClick={() => onOpenReel(reel, reel.brand)} style={{ background:CARD, border:`1px solid ${reel.status==="posted"?color+"44":BORDER}`, borderLeft:`4px solid ${color}`, borderRadius:12, padding:m?14:18, marginBottom:10, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", cursor:"pointer" }}>
-                {/* Brand + Series */}
-                <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, flexWrap:"wrap" }}>
-                  <div style={{ padding:"3px 10px", borderRadius:4, background:`${color}18`, border:`1px solid ${color}44`, fontSize:10, fontFamily:"monospace", color, fontWeight:700 }}>
-                    {reel.brand==="franz"?"FRANZ":"TGC"}
-                  </div>
-                  {sObj && <div style={{ padding:"3px 10px", borderRadius:4, background:`${sObj.color}11`, border:`1px solid ${sObj.color}33`, fontSize:10, fontFamily:"monospace", color:sObj.color }}>{sObj.name} · Pt {reel.part}</div>}
-                  <div onClick={e => e.stopPropagation()}><StatusBadge status={reel.status} onClick={() => onToggleStatus(reel.id, reel.status)} disabled={saving}/></div>
-                </div>
-
-                {/* Title */}
-                <div style={{ fontSize:m?16:18, fontWeight:700, color:TEXT, marginBottom:6 }}>{reel.title}</div>
-
-                {/* Hook — prominent */}
-                {reel.hook && (
-                  <div style={{ padding:"10px 14px", background:`${color}08`, border:`1px solid ${color}22`, borderRadius:8, marginBottom:8 }}>
-                    <div style={{ fontSize:9, color, fontFamily:"monospace", letterSpacing:"1.5px", marginBottom:3 }}>HOOK — FIRST 2 SECONDS</div>
-                    <div style={{ fontSize:14, color:TEXT, fontStyle:"italic" }}>"{reel.hook}"</div>
-                  </div>
-                )}
-
-                {/* Caption */}
-                {reel.caption && (
-                  <div style={{ fontSize:12, color:MUTED, fontStyle:"italic", marginBottom:8 }}>Caption: "{reel.caption}"</div>
-                )}
-
-                {/* Tap hint */}
-                <div style={{ fontSize:9, color:MUTED, fontFamily:"monospace", letterSpacing:"1px", marginTop:8 }}>TAP CARD FOR DETAILS →</div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Today Stories — full interactive cards */}
-      {todayStories.length > 0 && (
-        <div style={{ marginBottom:14 }}>
-          <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:8 }}>STORIES TODAY</div>
-          {todayStories.map(story => {
-            const color = bc(story.brand);
-            const slots = [
-              { key:"morning", label:"Morning", value:story.morning, status:story.morning_status },
-              { key:"midday",  label:"Midday",  value:story.midday,  status:story.midday_status  },
-              { key:"evening", label:"Evening", value:story.evening, status:story.evening_status },
-            ];
-            const doneCount = slots.filter(s => s.status === "posted").length;
-            return (
-              <div key={story.id} style={{ background:doneCount===3?`${color}08`:CARD, border:`1px solid ${doneCount>0?color+"44":BORDER}`, borderLeft:`4px solid ${doneCount===3?color:doneCount>0?color+"88":BORDER}`, borderRadius:12, padding:m?12:14, marginBottom:10 }}>
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
-                  <div style={{ fontSize:11, color, fontFamily:"monospace", fontWeight:700 }}>{story.brand==="franz"?"FRANZ":"TGC"} STORIES</div>
-                  <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                    <div style={{ display:"flex", gap:3 }}>
-                      {slots.map(s => <div key={s.key} style={{ width:8, height:8, borderRadius:"50%", background:s.status==="posted"?color:BORDER }}/>)}
-                    </div>
-                    <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", fontWeight:700 }}>{doneCount}/3</div>
-                  </div>
-                </div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
-                  {slots.map(slot => {
-                    const done = slot.status==="posted";
-                    return (
-                      <div key={slot.key}
-                        onClick={() => onEditStorySlot && onEditStorySlot(story.id, slot.key, slot.value)}
-                        style={{ background:done?`${color}0F`:SOFT, border:`1px solid ${done?color+"55":BORDER}`, borderRadius:8, padding:"10px 8px", cursor:"pointer", transition:"all 0.15s" }}
-                        onMouseEnter={e => e.currentTarget.style.borderColor=color}
-                        onMouseLeave={e => e.currentTarget.style.borderColor=done?color+"55":BORDER}>
-                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
-                          <span style={{ fontSize:8, color:done?color:MUTED, fontFamily:"monospace", fontWeight:700 }}>{slot.label.toUpperCase()}</span>
-                          <div onClick={e => { e.stopPropagation(); onToggleStorySlot && onToggleStorySlot(story.id, slot.key, slot.status); }}
-                            style={{ width:20, height:20, borderRadius:"50%", background:done?color:"transparent", border:`1.5px solid ${done?color:BORDER}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, color:"#fff", cursor:"pointer" }}>
-                            {done?"✓":""}
-                          </div>
-                        </div>
-                        <div style={{ fontSize:10, color:TEXT, lineHeight:1.4 }}>{slot.value}</div>
-                        <div style={{ marginTop:4, fontSize:8, color:done?color:MUTED, fontFamily:"monospace" }}>{done?"✓ posted":"tap to edit"}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Morgen Preview */}
-      {tomorrowReels.length > 0 && (
+      {/* KPI Cards */}
+      {totalToPost > 0 && (
         <div>
+          <KpiCard id="franz-reel"     brand="franz" type="reel"    posted={franzReelsPosted}   total={franzReelsTotal}   color={FRANZ} hasContent={franzReelsTotal>0}/>
+          <KpiCard id="tgc-reel"       brand="tgc"   type="reel"    posted={tgcReelsPosted}     total={tgcReelsTotal}     color={TGC}   hasContent={tgcReelsTotal>0}/>
+          <KpiCard id="franz-stories"  brand="franz" type="stories" posted={franzStoriesPosted} total={franzStoriesTotal} color={FRANZ} hasContent={franzStoriesTotal>0}/>
+          <KpiCard id="tgc-stories"    brand="tgc"   type="stories" posted={tgcStoriesPosted}   total={tgcStoriesTotal}   color={TGC}   hasContent={tgcStoriesTotal>0}/>
+        </div>
+      )}
+
+      {/* Tomorrow Preview */}
+      {tomorrowReels.length > 0 && (
+        <div style={{ marginTop:24 }}>
           <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:8 }}>TOMORROW</div>
           {tomorrowReels.map(reel => {
             const color = bc(reel.brand);
@@ -375,9 +431,6 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, onEditSt
   );
 }
 
-// ══════════════════════════════════════════════════════════════
-// SERIEN PLANUNG TAB
-// ══════════════════════════════════════════════════════════════
 function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving }) {
   const m = useIsMobile();
   const [expandedSeries, setExpandedSeries] = useState(null);
