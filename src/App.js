@@ -846,18 +846,112 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
           </div>
           <button onClick={onClose} style={{ background:"none", border:"none", color:MUTED, fontSize:22, cursor:"pointer", padding:12, minWidth:48, minHeight:48, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:8 }}>✕</button>
         </div>
-        <div style={{ height:1, background:BORDER, marginBottom:14 }}/>
-        {fR.map(r => <RR key={r.id} reel={r} brand="franz"/>)}
-        {tR.map(r => <RR key={r.id} reel={r} brand="tgc"/>)}
-        {fS.map(s => <div key={s.id} style={{ padding:12, background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10, marginBottom:10 }}>
-          <div style={{ fontSize:11, color:FRANZ, fontFamily:"monospace", fontWeight:700, marginBottom:6 }}>FRANZ STORIES</div>
-          {["morning","midday","evening"].map(slot => <div key={slot} style={{ fontSize:11, color:TEXT, marginBottom:3 }}><b>{slot}:</b> {s[slot]}</div>)}
-        </div>)}
-        {tS.map(s => <div key={s.id} style={{ padding:12, background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10, marginBottom:10 }}>
-          <div style={{ fontSize:11, color:TGC, fontFamily:"monospace", fontWeight:700, marginBottom:6 }}>TGC STORIES</div>
-          {["morning","midday","evening"].map(slot => <div key={slot} style={{ fontSize:11, color:TEXT, marginBottom:3 }}><b>{slot}:</b> {s[slot]}</div>)}
-        </div>)}
+        <div style={{ height:1, background:BORDER, marginBottom:18 }}/>
+
+        {/* ═══ REELS SECTION ═══ */}
+        {(fR.length > 0 || tR.length > 0) && (
+          <div style={{ marginBottom:24 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+              <div style={{ height:2, flex:1, background:BORDER }}/>
+              <div style={{ fontSize:11, color:MUTED, fontFamily:"monospace", letterSpacing:"3px", fontWeight:700 }}>REELS</div>
+              <div style={{ height:2, flex:1, background:BORDER }}/>
+            </div>
+            {fR.map(r => <RR key={r.id} reel={r} brand="franz"/>)}
+            {tR.map(r => <RR key={r.id} reel={r} brand="tgc"/>)}
+            {fR.length===0 && <div style={{ padding:"12px", border:`1px dashed ${BORDER}`, borderRadius:10, marginBottom:10, fontSize:11, color:MUTED, fontFamily:"monospace", textAlign:"center" }}>No Franz reel planned</div>}
+            {tR.length===0 && <div style={{ padding:"12px", border:`1px dashed ${BORDER}`, borderRadius:10, fontSize:11, color:MUTED, fontFamily:"monospace", textAlign:"center" }}>No TGC reel planned</div>}
+          </div>
+        )}
+
+        {/* ═══ STORIES SECTION ═══ */}
+        {(fS.length > 0 || tS.length > 0) && (
+          <div style={{ marginBottom:14 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
+              <div style={{ height:2, flex:1, background:BORDER }}/>
+              <div style={{ fontSize:11, color:MUTED, fontFamily:"monospace", letterSpacing:"3px", fontWeight:700 }}>STORIES</div>
+              <div style={{ height:2, flex:1, background:BORDER }}/>
+            </div>
+
+            {/* FRANZ Stories */}
+            {fS.map(story => {
+              const slots = [
+                { key:"morning", label:"Morning", value:story.morning, status:story.morning_status },
+                { key:"midday",  label:"Midday",  value:story.midday,  status:story.midday_status  },
+                { key:"evening", label:"Evening", value:story.evening, status:story.evening_status },
+              ];
+              const doneCount = slots.filter(s => s.status === "posted").length;
+              return (
+                <div key={story.id} style={{ background:doneCount===3?`${FRANZ}08`:CARD, border:`1px solid ${doneCount>0?FRANZ+"44":BORDER}`, borderLeft:`4px solid ${doneCount===3?FRANZ:doneCount>0?FRANZ+"88":BORDER}`, borderRadius:10, padding:12, marginBottom:10 }}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+                    <div style={{ fontSize:11, color:FRANZ, fontFamily:"monospace", fontWeight:700 }}>FRANZ STORIES</div>
+                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                      <div style={{ display:"flex", gap:3 }}>
+                        {slots.map(s => <div key={s.key} style={{ width:7, height:7, borderRadius:"50%", background:s.status==="posted"?FRANZ:BORDER }}/>)}
+                      </div>
+                      <span style={{ fontSize:10, color:MUTED, fontFamily:"monospace", fontWeight:700 }}>{doneCount}/3</span>
+                    </div>
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
+                    {slots.map(slot => {
+                      const done = slot.status==="posted";
+                      return (
+                        <div key={slot.key} style={{ background:done?`${FRANZ}0F`:SOFT, border:`1px solid ${done?FRANZ+"55":BORDER}`, borderRadius:8, padding:"8px 7px", minHeight:80 }}>
+                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
+                            <span style={{ fontSize:8, color:done?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700 }}>{slot.label.toUpperCase()}</span>
+                            <div onClick={() => onToggleStory && onToggleStory(story.id, slot.key, slot.status)}
+                              style={{ width:18, height:18, borderRadius:"50%", background:done?FRANZ:"transparent", border:`1.5px solid ${done?FRANZ:BORDER}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, color:"#fff", cursor:"pointer", flexShrink:0 }}>{done?"✓":""}</div>
+                          </div>
+                          <div style={{ fontSize:10, color:TEXT, lineHeight:1.4 }}>{slot.value || "—"}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* TGC Stories */}
+            {tS.map(story => {
+              const slots = [
+                { key:"morning", label:"Morning", value:story.morning, status:story.morning_status },
+                { key:"midday",  label:"Midday",  value:story.midday,  status:story.midday_status  },
+                { key:"evening", label:"Evening", value:story.evening, status:story.evening_status },
+              ];
+              const doneCount = slots.filter(s => s.status === "posted").length;
+              return (
+                <div key={story.id} style={{ background:doneCount===3?`${TGC}08`:CARD, border:`1px solid ${doneCount>0?TGC+"44":BORDER}`, borderLeft:`4px solid ${doneCount===3?TGC:doneCount>0?TGC+"88":BORDER}`, borderRadius:10, padding:12, marginBottom:10 }}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+                    <div style={{ fontSize:11, color:TGC, fontFamily:"monospace", fontWeight:700 }}>TGC STORIES</div>
+                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                      <div style={{ display:"flex", gap:3 }}>
+                        {slots.map(s => <div key={s.key} style={{ width:7, height:7, borderRadius:"50%", background:s.status==="posted"?TGC:BORDER }}/>)}
+                      </div>
+                      <span style={{ fontSize:10, color:MUTED, fontFamily:"monospace", fontWeight:700 }}>{doneCount}/3</span>
+                    </div>
+                  </div>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
+                    {slots.map(slot => {
+                      const done = slot.status==="posted";
+                      return (
+                        <div key={slot.key} style={{ background:done?`${TGC}0F`:SOFT, border:`1px solid ${done?TGC+"55":BORDER}`, borderRadius:8, padding:"8px 7px", minHeight:80 }}>
+                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
+                            <span style={{ fontSize:8, color:done?TGC:MUTED, fontFamily:"monospace", fontWeight:700 }}>{slot.label.toUpperCase()}</span>
+                            <div onClick={() => onToggleStory && onToggleStory(story.id, slot.key, slot.status)}
+                              style={{ width:18, height:18, borderRadius:"50%", background:done?TGC:"transparent", border:`1.5px solid ${done?TGC:BORDER}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, color:"#fff", cursor:"pointer", flexShrink:0 }}>{done?"✓":""}</div>
+                          </div>
+                          <div style={{ fontSize:10, color:TEXT, lineHeight:1.4 }}>{slot.value || "—"}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         {fR.length===0&&tR.length===0&&fS.length===0&&tS.length===0&&<div style={{ textAlign:"center", padding:40, color:MUTED, fontFamily:"monospace" }}>No content for this day.</div>}
+
         <div style={{ display:"flex", justifyContent:"flex-end", marginTop:14 }}><Btn onClick={onClose} accent={MUTED}>CLOSE</Btn></div>
       </div>
     </div>
