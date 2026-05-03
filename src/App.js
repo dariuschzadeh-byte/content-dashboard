@@ -19,6 +19,18 @@ import {
 // ── Colors ────────────────────────────────────────────────────
 const FRANZ  = "#C4527A";
 const TGC    = "#2D7D46";
+
+// ── Drive Folder Links ────────────────────────────────────────
+// Direkter Link zum Brand-Monats-Ordner. Videograf lädt Datei dort hoch.
+// Bei Monatswechsel hier neue URL eintragen.
+const DRIVE_FOLDERS = {
+  franz: "https://drive.google.com/drive/folders/1Em7X6eep15ZCEkUgoEsQxFnqLrSvxXti",
+  tgc:   "https://drive.google.com/drive/folders/12WPLF_MxfwU3eQ5RT3bHFsxyLu4OEF_M",
+};
+const DRIVE_RAW_FOLDERS = {
+  franz: "https://drive.google.com/drive/folders/1MdL1VyEhRXG8izigEM3ehuRVkfplNSlb",
+  tgc:   "https://drive.google.com/drive/folders/1S7uF2wx6Fehwws4BuwGVTLb91SD4h-KL",
+};
 const BUILD  = "#4A6FA5";
 const BG     = "#F5F0E8";
 const CARD   = "#FFFFFF";
@@ -626,27 +638,46 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
           </div>
         )}
 
-        {/* Drive Link Section */}
+        {/* Drive Folder Section */}
         <div style={{ marginBottom:20, padding:m?"14px":"16px 18px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:12 }}>
-          <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:10 }}>📁 DRIVE LINK</div>
+          <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:10 }}>📁 GOOGLE DRIVE</div>
+          
+          <div style={{ fontSize:12, color:TEXT, lineHeight:1.5, marginBottom:12 }}>
+            Upload the final reel using the file name above. Click the folder button to open the right Drive folder.
+          </div>
+
+          {/* Folder Buttons */}
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
+            <a href={DRIVE_FOLDERS[brand?.toLowerCase()] || DRIVE_FOLDERS.franz} target="_blank" rel="noopener noreferrer"
+              style={{ display:"inline-block", padding:"10px 16px", background:brand?.toLowerCase()==="tgc"?TGC:FRANZ, color:"#fff", borderRadius:8, textDecoration:"none", fontSize:12, fontFamily:"monospace", fontWeight:600 }}>
+              📁 OPEN FINAL FOLDER
+            </a>
+            <a href={DRIVE_RAW_FOLDERS[brand?.toLowerCase()] || DRIVE_RAW_FOLDERS.franz} target="_blank" rel="noopener noreferrer"
+              style={{ display:"inline-block", padding:"10px 16px", background:"transparent", border:`1px solid ${BORDER}`, color:MUTED, borderRadius:8, textDecoration:"none", fontSize:12, fontFamily:"monospace", fontWeight:600 }}>
+              📂 RAW FOLDER
+            </a>
+          </div>
+
+          {/* Optional Drive Link to specific file */}
+          <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:6, marginTop:14 }}>DIRECT LINK TO FILE (OPTIONAL)</div>
           {reel.drive_link ? (
             <div>
               <a href={reel.drive_link} target="_blank" rel="noopener noreferrer"
-                style={{ display:"inline-block", padding:"10px 16px", background:BUILD, color:"#fff", borderRadius:8, textDecoration:"none", fontSize:12, fontFamily:"monospace", fontWeight:600, marginBottom:8, marginRight:8 }}>
-                ▶ OPEN IN DRIVE
+                style={{ display:"inline-block", padding:"8px 14px", background:BUILD, color:"#fff", borderRadius:8, textDecoration:"none", fontSize:11, fontFamily:"monospace", fontWeight:600, marginRight:8 }}>
+                ▶ VIEW THIS REEL
               </a>
               <button onClick={async () => {
                 if (window.confirm("Remove drive link?")) {
                   await onUpdateDriveLink && onUpdateDriveLink(reel.id, "");
                 }
-              }} style={{ padding:"10px 14px", background:"transparent", border:`1px solid ${BORDER}`, color:MUTED, fontSize:11, fontFamily:"monospace", cursor:"pointer", borderRadius:8 }}>
+              }} style={{ padding:"8px 12px", background:"transparent", border:`1px solid ${BORDER}`, color:MUTED, fontSize:10, fontFamily:"monospace", cursor:"pointer", borderRadius:8 }}>
                 ✕ Remove
               </button>
               <div style={{ fontSize:10, color:MUTED, marginTop:8, fontFamily:"monospace", wordBreak:"break-all" }}>{reel.drive_link}</div>
             </div>
           ) : (
             <div>
-              <input type="text" placeholder="Paste Google Drive link here..."
+              <input type="text" placeholder="Paste link to specific file (optional)..."
                 onKeyDown={async (e) => {
                   if (e.key === "Enter" && e.target.value.trim()) {
                     await onUpdateDriveLink && onUpdateDriveLink(reel.id, e.target.value.trim());
@@ -659,9 +690,9 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
                     e.target.value = "";
                   }
                 }}
-                style={{ width:"100%", padding:"10px 12px", border:`1px solid ${BORDER}`, borderRadius:8, fontSize:12, fontFamily:"monospace", background:CARD, color:TEXT, boxSizing:"border-box" }}/>
-              <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", marginTop:6 }}>
-                Press Enter or click outside to save · Auto-sets status to "Filmed"
+                style={{ width:"100%", padding:"8px 10px", border:`1px solid ${BORDER}`, borderRadius:8, fontSize:11, fontFamily:"monospace", background:CARD, color:TEXT, boxSizing:"border-box" }}/>
+              <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", marginTop:4 }}>
+                Auto-sets status to "Filmed" when link is added
               </div>
             </div>
           )}
