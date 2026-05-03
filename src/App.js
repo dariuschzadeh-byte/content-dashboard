@@ -13,6 +13,7 @@ import {
   addReel, addStory, deleteReel, deleteStory,
   updateReelStatus, updateStorySlot, updateStorySlotStatus,
   saveAnalytics, bulkImportReels, bulkImportStories,
+  updateReelDriveLink, updateReelPostedAt,
 } from "./supabaseClient";
 
 // ── Colors ────────────────────────────────────────────────────
@@ -539,7 +540,7 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving }) {
 // ══════════════════════════════════════════════════════════════
 // REEL DETAIL MODAL
 // ══════════════════════════════════════════════════════════════
-function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus, saving, analytics, onSaveAnalytics }) {
+function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus, onUpdateDriveLink, saving, analytics, onSaveAnalytics }) {
   const m     = useIsMobile();
   useSwipeBack(onClose);
   const color = bc(brand);
@@ -605,6 +606,65 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
               );
             })}
           </div>
+          {reel.posted_at && (
+            <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", marginTop:8 }}>
+              ✓ Posted: {new Date(reel.posted_at).toLocaleString("en-GB", {day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})}
+            </div>
+          )}
+        </div>
+
+        {/* File Name — Naming Convention Display */}
+        {reel.file_name && (
+          <div style={{ marginBottom:16, padding:"12px 14px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10 }}>
+            <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:6 }}>FILE NAME (TAP TO COPY)</div>
+            <div onClick={() => {
+              navigator.clipboard.writeText(reel.file_name);
+              alert("Copied: " + reel.file_name);
+            }} style={{ fontSize:12, color:TEXT, fontFamily:"monospace", padding:"8px 10px", background:CARD, border:`1px solid ${BORDER}`, borderRadius:6, cursor:"pointer", wordBreak:"break-all" }}>
+              {reel.file_name} 📋
+            </div>
+          </div>
+        )}
+
+        {/* Drive Link Section */}
+        <div style={{ marginBottom:20, padding:m?"14px":"16px 18px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:12 }}>
+          <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:10 }}>📁 DRIVE LINK</div>
+          {reel.drive_link ? (
+            <div>
+              <a href={reel.drive_link} target="_blank" rel="noopener noreferrer"
+                style={{ display:"inline-block", padding:"10px 16px", background:BUILD, color:"#fff", borderRadius:8, textDecoration:"none", fontSize:12, fontFamily:"monospace", fontWeight:600, marginBottom:8, marginRight:8 }}>
+                ▶ OPEN IN DRIVE
+              </a>
+              <button onClick={async () => {
+                if (confirm("Remove drive link?")) {
+                  await onUpdateDriveLink && onUpdateDriveLink(reel.id, "");
+                }
+              }} style={{ padding:"10px 14px", background:"transparent", border:`1px solid ${BORDER}`, color:MUTED, fontSize:11, fontFamily:"monospace", cursor:"pointer", borderRadius:8 }}>
+                ✕ Remove
+              </button>
+              <div style={{ fontSize:10, color:MUTED, marginTop:8, fontFamily:"monospace", wordBreak:"break-all" }}>{reel.drive_link}</div>
+            </div>
+          ) : (
+            <div>
+              <input type="text" placeholder="Paste Google Drive link here..."
+                onKeyDown={async (e) => {
+                  if (e.key === "Enter" && e.target.value.trim()) {
+                    await onUpdateDriveLink && onUpdateDriveLink(reel.id, e.target.value.trim());
+                    e.target.value = "";
+                  }
+                }}
+                onBlur={async (e) => {
+                  if (e.target.value.trim()) {
+                    await onUpdateDriveLink && onUpdateDriveLink(reel.id, e.target.value.trim());
+                    e.target.value = "";
+                  }
+                }}
+                style={{ width:"100%", padding:"10px 12px", border:`1px solid ${BORDER}`, borderRadius:8, fontSize:12, fontFamily:"monospace", background:CARD, color:TEXT, boxSizing:"border-box" }}/>
+              <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", marginTop:6 }}>
+                Press Enter or click outside to save · Auto-sets status to "Filmed"
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Analytics */}
@@ -1010,6 +1070,285 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
 // ══════════════════════════════════════════════════════════════
 // MAIN DASHBOARD
 // ══════════════════════════════════════════════════════════════
+function BriefingTab() {
+  const m = useIsMobile();
+
+  const Section = ({ title, color, children }) => (
+    <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderLeft:`4px solid ${color}`, borderRadius:14, padding:m?"18px 16px":"24px 28px", marginBottom:14, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+      <div style={{ fontSize:11, color, fontFamily:"monospace", letterSpacing:"2px", fontWeight:700, marginBottom:12 }}>{title.toUpperCase()}</div>
+      {children}
+    </div>
+  );
+
+  const P = ({ children, bold }) => (
+    <p style={{ fontSize:14, color:TEXT, lineHeight:1.6, marginBottom:10, fontWeight: bold ? 600 : 400 }}>{children}</p>
+  );
+
+  const Bullet = ({ children }) => (
+    <li style={{ fontSize:14, color:TEXT, lineHeight:1.7, marginBottom:6, paddingLeft:6 }}>{children}</li>
+  );
+
+  const Code = ({ children }) => (
+    <span style={{ background:SOFT, padding:"2px 7px", borderRadius:4, fontFamily:"monospace", fontSize:12, color:TEXT }}>{children}</span>
+  );
+
+  return (
+    <div style={{ maxWidth:900, margin:"0 auto" }}>
+
+      {/* Welcome Header */}
+      <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14, padding:m?"20px 16px":"32px", marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+        <div style={{ fontSize:11, color:MUTED, fontFamily:"monospace", letterSpacing:"3px", marginBottom:6 }}>VIDEOGRAPHER ONBOARDING</div>
+        <div style={{ fontSize:m?22:30, fontWeight:700, color:TEXT, marginBottom:8 }}>Welcome to the Team</div>
+        <p style={{ fontSize:14, color:MUTED, lineHeight:1.6, marginBottom:0 }}>
+          This is your everything-you-need-to-know guide. Read it once, then come back whenever you need a refresher.
+          The dashboard is your daily source of truth — what to film, when to film, and where it lives.
+        </p>
+      </div>
+
+      {/* Brands */}
+      <Section title="The Two Brands" color={FRANZ}>
+        <div style={{ display:"grid", gridTemplateColumns: m ? "1fr" : "1fr 1fr", gap:12 }}>
+          <div style={{ padding:"14px 16px", background:`${FRANZ}0A`, border:`1px solid ${FRANZ}33`, borderRadius:10 }}>
+            <div style={{ fontSize:11, color:FRANZ, fontFamily:"monospace", fontWeight:700, letterSpacing:"2px", marginBottom:6 }}>FRANZ</div>
+            <P><b>Cinnamon roll &amp; specialty coffee/matcha shop.</b></P>
+            <P><b>USP:</b> free oat milk (rare in Bali).</P>
+            <P><b>Vibe:</b> girly, aesthetic, premium, feminine. Soft pinks, creams, light wood.</P>
+            <P><b>Hero products:</b> 6 iced matchas, 6 Fine Selection iced coffees, cinnamon rolls.</P>
+          </div>
+          <div style={{ padding:"14px 16px", background:`${TGC}0A`, border:`1px solid ${TGC}33`, borderRadius:10 }}>
+            <div style={{ fontSize:11, color:TGC, fontFamily:"monospace", fontWeight:700, letterSpacing:"2px", marginBottom:6 }}>THE GREEN COLLECTIVE</div>
+            <P><b>Premium health takeaway store.</b></P>
+            <P><b>USP:</b> clean, transparent, California-grade wellness.</P>
+            <P><b>Vibe:</b> clean, organic, premium. Raw concrete, kraft, glass, palm leaves.</P>
+            <P><b>Hero products:</b> 9 infused waters, 8 whey protein bars, juices, electrolytes.</P>
+          </div>
+        </div>
+      </Section>
+
+      {/* Target Audience */}
+      <Section title="Target Audience" color={BUILD}>
+        <P>Age 20–35. Expats, digital nomads, surfer-influencer-adjacent crowd in Pererenan and Canggu.</P>
+        <P>International — mostly Australia, USA, Europe, Russia.</P>
+        <P>They live on TikTok and Reels, scroll muted, decide in 1.5 seconds.</P>
+        <P bold>What they want:</P>
+        <ul style={{ marginTop:0, marginBottom:12, paddingLeft:24 }}>
+          <Bullet>Anti-aspirational cool — real ingredients, lived-in spaces, confident understatement</Bullet>
+          <Bullet>Aesthetic close-ups, hands-only POV, ASMR product moments</Bullet>
+          <Bullet>Stories where they can see who's behind the brand, not just polished marketing</Bullet>
+        </ul>
+        <P bold>What they scroll past:</P>
+        <ul style={{ marginTop:0, paddingLeft:24 }}>
+          <Bullet>Corporate language, forced smiles, posed customer shots</Bullet>
+          <Bullet>Generic Bali tourism cues (beach sunsets, scooters in traffic)</Bullet>
+          <Bullet>Over-saturated green grading, tropical filters</Bullet>
+        </ul>
+      </Section>
+
+      {/* How We Shoot */}
+      <Section title="How We Shoot — Core Rules" color={FRANZ}>
+        <ul style={{ marginTop:0, paddingLeft:24 }}>
+          <Bullet><b>You stay behind the camera.</b> No selfie content. No talking-head videos. Story is told through hands, products, spaces.</Bullet>
+          <Bullet><b>POV and ASMR are the spine.</b> Phone-in-hand POV walking shots. Macro close-ups of pours, drips, glaze, condensation. ASMR mic on for every product moment.</Bullet>
+          <Bullet><b>Hands only.</b> When people appear, only hands are visible. Faces only in planned Day-In-The-Life episodes.</Bullet>
+          <Bullet><b>Vertical 9:16 or 4:5.</b> Shot on iPhone 15 Pro or newer. Always vertical.</Bullet>
+          <Bullet><b>Light = morning + golden hour.</b> Best windows: 7–9am and 5–7pm Bali time. Avoid harsh midday.</Bullet>
+          <Bullet><b>Hooks in 1.5 seconds.</b> Every reel must grab in the first beat — strong visual or text overlay.</Bullet>
+          <Bullet><b>Trust the visuals.</b> Captions are short, lowercase, often a single line. Never explain what's already shown.</Bullet>
+        </ul>
+      </Section>
+
+      {/* Posting Frequency */}
+      <Section title="Posting Frequency" color={TGC}>
+        <P bold>Daily output (per brand):</P>
+        <ul style={{ marginTop:0, marginBottom:12, paddingLeft:24 }}>
+          <Bullet><b>1 Reel per day</b> — planned in advance via this dashboard, with hook + shot list + caption + audio direction</Bullet>
+          <Bullet><b>6 Stories per day</b> — looser, batch-shot from daily footage, follow the slot blueprint</Bullet>
+        </ul>
+        <P bold>Total monthly: 62 Reels (31 Franz + 31 TGC) + 372 Stories</P>
+        <P bold>Best posting windows:</P>
+        <ul style={{ marginTop:0, paddingLeft:24 }}>
+          <Bullet><b>11:00–13:00 Bali time</b> — peak afternoon for AU/EU lunch overlap</Bullet>
+          <Bullet><b>17:00–18:00 Bali time</b> — golden hour drop, peak USA evening</Bullet>
+        </ul>
+      </Section>
+
+      {/* Daily Rhythm */}
+      <Section title="Daily Rhythm — Three Shoot Windows" color={BUILD}>
+        <div style={{ marginBottom:12, padding:"12px 14px", background:SOFT, borderRadius:8 }}>
+          <div style={{ fontSize:12, color:TEXT, fontWeight:700, marginBottom:4 }}>🌅 Morning Batch — 7–9am</div>
+          <P>Opening shots, bakery prep, fresh roll trays, espresso machine warm-up, morning light through rice field windows. Cover stories slot 1–2 and any morning-light reel.</P>
+        </div>
+        <div style={{ marginBottom:12, padding:"12px 14px", background:SOFT, borderRadius:8 }}>
+          <div style={{ fontSize:12, color:TEXT, fontWeight:700, marginBottom:4 }}>☀️ Midday Batch — 11:30am–12:30pm</div>
+          <P>Drink hero shots, cinnamon roll pulls, fridge restocks, customer hand moments. Cover the day's main reel and stories slot 3–4.</P>
+        </div>
+        <div style={{ padding:"12px 14px", background:SOFT, borderRadius:8 }}>
+          <div style={{ fontSize:12, color:TEXT, fontWeight:700, marginBottom:4 }}>🌇 Golden Hour Batch — 5–7pm</div>
+          <P>Atmosphere, rice fields, bench oasis, customer back-of-head moments, sunset reels. Cover stories slot 5–6 and any golden-hour reel.</P>
+        </div>
+      </Section>
+
+      {/* File Naming Convention */}
+      <Section title="File Naming Convention" color={AMBER}>
+        <P>Every file follows this format:</P>
+        <div style={{ padding:"14px 16px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:8, marginBottom:12 }}>
+          <div style={{ fontSize:13, fontFamily:"monospace", color:TEXT, fontWeight:700 }}>YYYY-MM-DD_BRAND_TYPE_Title-With-Dashes</div>
+        </div>
+        <P bold>Examples:</P>
+        <ul style={{ marginTop:0, marginBottom:12, paddingLeft:24, listStyleType:"none" }}>
+          <Bullet><Code>2026-05-04_FRANZ_REEL_Mango-Matcha-Appreciation</Code></Bullet>
+          <Bullet><Code>2026-05-08_FRANZ_STREET_Bauarbeiter-Cinnamon-Rolls</Code></Bullet>
+          <Bullet><Code>2026-05-14_FRANZ_DITL_The-Baker</Code></Bullet>
+          <Bullet><Code>2026-05-23_TGC_SERIES_The-NMAX-Build-Reveal</Code></Bullet>
+        </ul>
+        <P bold>Type codes:</P>
+        <ul style={{ marginTop:0, marginBottom:12, paddingLeft:24 }}>
+          <Bullet><Code>REEL</Code> — Standalone Reels</Bullet>
+          <Bullet><Code>SERIES</Code> — Series Episodes (Perfect Roll, NMAX Build, etc.)</Bullet>
+          <Bullet><Code>STREET</Code> — Street Reactions (Tukang, Surfer, Pilates Girls, etc.)</Bullet>
+          <Bullet><Code>DITL</Code> — Day In The Life Episodes</Bullet>
+        </ul>
+        <div style={{ padding:"12px 14px", background:`${AMBER}15`, border:`1px solid ${AMBER}33`, borderRadius:8, marginTop:8 }}>
+          <P bold>💡 Pro Tip</P>
+          <P>Every reel in the dashboard already has its file name pre-generated. Open the reel detail and tap the file name to copy it. Then rename your file before uploading to Drive.</P>
+        </div>
+      </Section>
+
+      {/* Drive Folder Structure */}
+      <Section title="Google Drive Folder Structure" color={TGC}>
+        <P>All videos go into Google Drive. Folder structure is set up by the team.</P>
+        <div style={{ padding:"16px 18px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10, fontFamily:"monospace", fontSize:13, color:TEXT, lineHeight:1.7 }}>
+          📁 Content Archive<br/>
+          &nbsp;&nbsp;└── 📁 2026-05-May<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── 📁 Franz<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;├── 📁 RAW<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;└── 📁 FINAL<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└── 📁 TGC<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── 📁 RAW<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└── 📁 FINAL
+        </div>
+        <ul style={{ marginTop:14, paddingLeft:24 }}>
+          <Bullet><b>RAW folder:</b> All original/unedited footage. Backup material for later compilations.</Bullet>
+          <Bullet><b>FINAL folder:</b> The final exported reel ready to post. This is what goes live on Instagram/TikTok.</Bullet>
+        </ul>
+      </Section>
+
+      {/* Workflow */}
+      <Section title="Workflow — From Idea to Posted" color={FRANZ}>
+        <ol style={{ marginTop:0, paddingLeft:24, fontSize:14, color:TEXT, lineHeight:1.7 }}>
+          <li style={{ marginBottom:8 }}><b>Open the Dashboard daily</b> — check what's planned for today</li>
+          <li style={{ marginBottom:8 }}><b>Read the reel brief</b> — hook, what to film, vibe, audio direction, text overlays</li>
+          <li style={{ marginBottom:8 }}><b>Copy the file name</b> from the reel detail (tap to copy)</li>
+          <li style={{ marginBottom:8 }}><b>Shoot the footage</b> following the brief — bias toward shooting more than needed</li>
+          <li style={{ marginBottom:8 }}><b>Upload to RAW folder</b> in the right brand folder</li>
+          <li style={{ marginBottom:8 }}><b>Edit the reel</b> — add text overlays, audio, color grading</li>
+          <li style={{ marginBottom:8 }}><b>Export and rename</b> with the dashboard file name</li>
+          <li style={{ marginBottom:8 }}><b>Upload final to FINAL folder</b> in the right brand folder</li>
+          <li style={{ marginBottom:8 }}><b>Copy the Drive link</b> of the final video</li>
+          <li style={{ marginBottom:8 }}><b>Paste link in Dashboard</b> — open the reel detail, paste in "Drive Link" field. Status auto-updates to "Filmed"</li>
+          <li><b>After posting on Instagram/TikTok</b> — set status to "Posted" in the dashboard</li>
+        </ol>
+      </Section>
+
+      {/* Series Overview */}
+      <Section title="Active Series" color={BUILD}>
+        <P>Series episodes post when real progress happens — not on fixed dates. Between episodes, standalone reels fill the schedule.</P>
+        <ul style={{ marginTop:0, paddingLeft:24 }}>
+          <Bullet><b>The Perfect Roll</b> (Franz, 4 parts) — cinnamon roll story arc</Bullet>
+          <Bullet><b>What's In Your Drink</b> (Both, 4 parts) — origin/transparency for matcha, oat milk, coffee, infused water</Bullet>
+          <Bullet><b>DITL · The Baker</b> (Franz, 1) — day in the life of the baker</Bullet>
+          <Bullet><b>DITL · Cory the Barista</b> (Franz, 1) — day in the life of the barista</Bullet>
+          <Bullet><b>DITL · Faiz</b> (TGC, 1) — day in the life of operations manager</Bullet>
+          <Bullet><b>The TGC Sign</b> (TGC, 2) — sign build retrospective + reveal</Bullet>
+          <Bullet><b>The NMAX Build</b> (TGC, 3) — delivery scooter custom build</Bullet>
+          <Bullet><b>Building TGC From Zero</b> (TGC, 3) — pre-launch BTS, launch day, one week in</Bullet>
+          <Bullet><b>Find The Billboard</b> (TGC, 2) — quest to install billboard</Bullet>
+          <Bullet><b>Photo Booth Hunt</b> (TGC, 1+) — photo booth restoration</Bullet>
+          <Bullet><b>Street Reactions</b> (Both, 5+) — give products to Tukang, Surfer, Banjar Neighbours, Pilates Girls, Gym Crowd. Film reactions.</Bullet>
+        </ul>
+      </Section>
+
+      {/* What to Film vs Avoid */}
+      <Section title="Film vs Don't Film" color={AMBER}>
+        <div style={{ display:"grid", gridTemplateColumns: m ? "1fr" : "1fr 1fr", gap:12 }}>
+          <div style={{ padding:"14px 16px", background:`${TGC}0A`, border:`1px solid ${TGC}33`, borderRadius:10 }}>
+            <div style={{ fontSize:13, color:TGC, fontWeight:700, marginBottom:8 }}>✓ FILM</div>
+            <ul style={{ margin:0, paddingLeft:20, fontSize:13, color:TEXT, lineHeight:1.7 }}>
+              <li>Drink pours, layered builds, condensation, ice cracks</li>
+              <li>Cinnamon roll pulls, glaze drips, bake textures</li>
+              <li>Fridge restocks, ingredient flat lays</li>
+              <li>Hands placing, pouring, opening, closing</li>
+              <li>Rice fields through windows, palm leaf shadows</li>
+              <li>POV walks at golden hour</li>
+              <li>Bench oasis at sunset</li>
+              <li>NMAX scooter, key turns</li>
+              <li>Production kitchen process</li>
+            </ul>
+          </div>
+          <div style={{ padding:"14px 16px", background:`${FRANZ}0A`, border:`1px solid ${FRANZ}33`, borderRadius:10 }}>
+            <div style={{ fontSize:13, color:FRANZ, fontWeight:700, marginBottom:8 }}>✗ AVOID</div>
+            <ul style={{ margin:0, paddingLeft:20, fontSize:13, color:TEXT, lineHeight:1.7 }}>
+              <li>Full faces (except planned DITL)</li>
+              <li>Selfie-style talking videos</li>
+              <li>Forced smiles, posed shots</li>
+              <li>Generic Bali tourism cues</li>
+              <li>Over-saturated tropical filters</li>
+              <li>Loud transitions, gimmicky effects</li>
+              <li>Long-form explanation videos</li>
+              <li>Hashtag-spam content</li>
+              <li>Anything that looks like a corporate ad</li>
+            </ul>
+          </div>
+        </div>
+      </Section>
+
+      {/* Voice & Tone */}
+      <Section title="Voice & Tone Cheat-Sheet" color={FRANZ}>
+        <P>Lowercase. One line. Trust the visual. Confident understatement.</P>
+        <div style={{ display:"grid", gridTemplateColumns: m ? "1fr" : "1fr 1fr", gap:12, marginTop:8 }}>
+          <div style={{ padding:"12px 14px", background:`${TGC}0A`, border:`1px solid ${TGC}33`, borderRadius:10 }}>
+            <div style={{ fontSize:11, color:TGC, fontWeight:700, marginBottom:6, fontFamily:"monospace", letterSpacing:"1px" }}>DO</div>
+            <ul style={{ margin:0, paddingLeft:18, fontSize:13, color:TEXT, lineHeight:1.6 }}>
+              <li>"oat milk is on us, always"</li>
+              <li>"less sweet. more grown-up."</li>
+              <li>"she opens monday. quietly."</li>
+              <li>"infused water but the kind your skin notices"</li>
+            </ul>
+          </div>
+          <div style={{ padding:"12px 14px", background:`${FRANZ}0A`, border:`1px solid ${FRANZ}33`, borderRadius:10 }}>
+            <div style={{ fontSize:11, color:FRANZ, fontWeight:700, marginBottom:6, fontFamily:"monospace", letterSpacing:"1px" }}>DON'T</div>
+            <ul style={{ margin:0, paddingLeft:18, fontSize:13, color:TEXT, lineHeight:1.6 }}>
+              <li>"We're proud to offer complimentary plant-based milk alternatives"</li>
+              <li>"A balanced, sophisticated flavour profile"</li>
+              <li>"Grand opening this Monday — visit us!"</li>
+              <li>"Hydration with benefits!"</li>
+            </ul>
+          </div>
+        </div>
+      </Section>
+
+      {/* Locations */}
+      <Section title="Best Filming Locations" color={TGC}>
+        <ul style={{ marginTop:0, paddingLeft:24 }}>
+          <Bullet><b>Floor-to-ceiling windows</b> — rice fields visible, perfect for morning light reels</Bullet>
+          <Bullet><b>Green Oasis bench</b> outside, surrounded by palm trees — golden hour gold</Bullet>
+          <Bullet><b>Production Kitchen</b> — for BTS, juice production, baking, bottling</Bullet>
+          <Bullet><b>Front entrance</b> with palm shadows — for door/open sign reels</Bullet>
+          <Bullet><b>Rice fields front and back of stores</b> — atmospheric establishing shots</Bullet>
+        </ul>
+      </Section>
+
+      {/* Final Note */}
+      <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14, padding:m?"18px 16px":"24px 28px", marginBottom:24, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
+        <div style={{ fontSize:11, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:8 }}>FIRST WEEK NOTE</div>
+        <P>First week is observation and shooting alongside Cory. By week two you'll be running shoots solo. Don't worry about getting everything right immediately. Bias toward shooting more than we need. The dashboard is the source of truth — when in doubt, check it.</P>
+        <P bold>We meet weekly to review what worked and adjust. Welcome to the team.</P>
+      </div>
+
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const m = useIsMobile();
 
@@ -1057,18 +1396,38 @@ export default function Dashboard() {
       setError("Status update failed: " + e.message);
     }
   };
-  // ── Set status directly to a specific value ──
+  // ── Set status directly to a specific value (auto-stamps posted_at) ──
   const handleSetStatus = async (id, newStatus) => {
     const oldStatus = reels.find(r => r.id === id)?.status;
     if (oldStatus === newStatus) return;
+    const postedAt = newStatus === "posted" ? new Date().toISOString() : null;
     // Optimistic UI update
-    setReels(prevList => prevList.map(r => r.id===id ? {...r, status:newStatus} : r));
+    setReels(prevList => prevList.map(r => r.id===id ? {...r, status:newStatus, posted_at:postedAt || r.posted_at} : r));
     try {
       await updateReelStatus(id, newStatus);
+      if (newStatus === "posted" && postedAt) {
+        await updateReelPostedAt(id, postedAt);
+      }
     } catch (e) {
       // Revert on error
       setReels(prevList => prevList.map(r => r.id===id ? {...r, status:oldStatus} : r));
       setError("Status update failed: " + e.message);
+    }
+  };
+
+  // ── Update Drive Link (auto-sets status to filmed if planned) ──
+  const handleUpdateDriveLink = async (id, link) => {
+    const reel = reels.find(r => r.id === id);
+    const wasJustPlanned = reel?.status === "planned" && link;
+    setReels(prevList => prevList.map(r => r.id===id ? {...r, drive_link:link, status: wasJustPlanned ? "filmed" : r.status} : r));
+    try {
+      await updateReelDriveLink(id, link);
+      if (wasJustPlanned) {
+        await updateReelStatus(id, "filmed");
+      }
+    } catch (e) {
+      setReels(prevList => prevList.map(r => r.id===id ? {...r, drive_link:reel?.drive_link} : r));
+      setError("Drive link update failed: " + e.message);
     }
   };
 
@@ -1189,10 +1548,11 @@ export default function Dashboard() {
 
   const TABS = [
     ["today", "📅", "Today"],
-    ["calendar", "🗓", "Kalender"],
+    ["calendar", "🗓", "Calendar"],
     ["reels",    "🎬", "Reels"],
     ["stories",  "📸", "Stories"],
     ["series", "🎞", "Series"],
+    ["briefing", "📖", "Briefing"],
   ];
 
   return (
@@ -1206,6 +1566,7 @@ export default function Dashboard() {
           onClose={()=>setDetailReel(null)}
           onToggleStatus={handleToggleStatus}
           onSetStatus={handleSetStatus}
+          onUpdateDriveLink={handleUpdateDriveLink}
           saving={saving}
           analytics={detailReel.reel.analytics?.[0]}
           onSaveAnalytics={handleSaveAnalytics}/>
@@ -1467,6 +1828,9 @@ export default function Dashboard() {
                 onOpenReel={(reel,brand)=>setDetailReel({reel,brand})}
                 onToggleStatus={handleToggleStatus}
                 saving={saving}/>
+            )}
+            {tab==="briefing" && (
+              <BriefingTab/>
             )}
           </>
         )}

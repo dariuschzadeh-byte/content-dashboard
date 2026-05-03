@@ -95,6 +95,28 @@ export async function updateReelStatus(id, status) {
   return data;
 }
 
+export async function updateReelDriveLink(id, link) {
+  const { data, error } = await supabase
+    .from("reels")
+    .update({ drive_link: link || null })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateReelPostedAt(id, postedAt) {
+  const { data, error } = await supabase
+    .from("reels")
+    .update({ posted_at: postedAt })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export async function deleteReel(id) {
   const { error } = await supabase
     .from("reels")
