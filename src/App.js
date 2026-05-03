@@ -619,7 +619,7 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
             <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:6 }}>FILE NAME (TAP TO COPY)</div>
             <div onClick={() => {
               navigator.clipboard.writeText(reel.file_name);
-              alert("Copied: " + reel.file_name);
+              window.alert("Copied: " + reel.file_name);
             }} style={{ fontSize:12, color:TEXT, fontFamily:"monospace", padding:"8px 10px", background:CARD, border:`1px solid ${BORDER}`, borderRadius:6, cursor:"pointer", wordBreak:"break-all" }}>
               {reel.file_name} 📋
             </div>
@@ -636,7 +636,7 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
                 ▶ OPEN IN DRIVE
               </a>
               <button onClick={async () => {
-                if (confirm("Remove drive link?")) {
+                if (window.confirm("Remove drive link?")) {
                   await onUpdateDriveLink && onUpdateDriveLink(reel.id, "");
                 }
               }} style={{ padding:"10px 14px", background:"transparent", border:`1px solid ${BORDER}`, color:MUTED, fontSize:11, fontFamily:"monospace", cursor:"pointer", borderRadius:8 }}>
