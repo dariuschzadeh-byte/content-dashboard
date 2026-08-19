@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   fetchSeries, fetchReels, fetchStories,
+  addSeries, deleteSeries,
   addReel, addStory, deleteReel, deleteStory,
   updateReelStatus, updateStorySlot, updateStorySlotStatus,
   saveAnalytics, bulkImportReels, bulkImportStories,
@@ -437,12 +438,40 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, onEditSt
   );
 }
 
-function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving }) {
+function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving, role, onAdd, onDelete }) {
   const m = useIsMobile();
   const [expandedSeries, setExpandedSeries] = useState(null);
+  const isAdmin = role === "admin";
+  const [adding, setAdding] = useState(false);
+  const [ns, setNs] = useState({ id:"", name:"", brand:"Both", color:"#C4527A", parts:3 });
+  const submitNew = () => {
+    const id = (ns.id || ns.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    if (!id || !ns.name) return;
+    onAdd({ ...ns, id });
+    setNs({ id:"", name:"", brand:"Both", color:"#C4527A", parts:3 });
+    setAdding(false);
+  };
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+      {isAdmin && (
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          {!adding ? (
+            <button onClick={()=>setAdding(true)} style={{ alignSelf:"flex-start", padding:"8px 16px", borderRadius:8, border:`1px solid ${FRANZ}`, background:`${FRANZ}11`, color:FRANZ, fontSize:12, fontFamily:"monospace", fontWeight:700, cursor:"pointer" }}>+ SERIES</button>
+          ) : (
+            <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:12, padding:16, display:"flex", flexWrap:"wrap", gap:10, alignItems:"center" }}>
+              <input placeholder="Name" value={ns.name} onChange={e=>setNs(p=>({...p,name:e.target.value}))} style={{ padding:"9px 12px", borderRadius:8, border:`1px solid ${BORDER}`, fontSize:13, flex:"1 1 160px" }}/>
+              <select value={ns.brand} onChange={e=>setNs(p=>({...p,brand:e.target.value}))} style={{ padding:"9px 12px", borderRadius:8, border:`1px solid ${BORDER}`, fontSize:13 }}>
+                <option value="Both">Both</option><option value="Franz">Franz</option><option value="TGC">TGC</option>
+              </select>
+              <input type="number" min="1" placeholder="Parts" value={ns.parts} onChange={e=>setNs(p=>({...p,parts:e.target.value}))} style={{ padding:"9px 12px", borderRadius:8, border:`1px solid ${BORDER}`, fontSize:13, width:80 }}/>
+              <input type="color" value={ns.color} onChange={e=>setNs(p=>({...p,color:e.target.value}))} title="Color" style={{ width:40, height:38, border:`1px solid ${BORDER}`, borderRadius:8, cursor:"pointer" }}/>
+              <button onClick={submitNew} style={{ padding:"9px 16px", borderRadius:8, border:"none", background:TEXT, color:BG, fontSize:13, fontWeight:600, cursor:"pointer" }}>Add</button>
+              <button onClick={()=>setAdding(false)} style={{ padding:"9px 12px", borderRadius:8, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:13, cursor:"pointer" }}>Cancel</button>
+            </div>
+          )}
+        </div>
+      )}
       {series.map(s => {
         const brands  = s.brand==="Both" ? ["franz","tgc"] : [s.brand.toLowerCase()];
         // Show ALL reels matching this series (with or without date)
@@ -491,6 +520,11 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving }) {
                     {deadlineLabel(nextDays)}
                   </div>
                 </div>
+              )}
+              {isAdmin && (
+                <button onClick={(e)=>{ e.stopPropagation(); if(window.confirm(`Delete series "${s.name}"?`)) onDelete(s.id); }}
+                  title="Delete series"
+                  style={{ marginLeft:10, flexShrink:0, width:28, height:28, borderRadius:8, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:14, cursor:"pointer", lineHeight:1 }}>✕</button>
               )}
             </div>
 
@@ -1508,6 +1542,21 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
     catch(e){setError(e.message);}finally{setSaving(false);}
   };
 
+  // ── Series admin (admin-only; RLS also enforces it) ──
+  const handleAddSeries = async (s) => {
+    setError(null);
+    try {
+      const created = await addSeries(s);
+      setSeries(prev => [...prev, created].sort((a,b)=>a.name.localeCompare(b.name)));
+    } catch(e){ setError("Add series failed: " + e.message); }
+  };
+  const handleDeleteSeries = async (id) => {
+    const prevList = series;
+    setSeries(p => p.filter(s => s.id !== id));
+    try { await deleteSeries(id); }
+    catch(e){ setSeries(prevList); setError("Delete series failed: " + e.message); }
+  };
+
   const handleToggleStory = async (id, slot, currentStatus) => {
     // Optimistic update — flip checkbox immediately
     const newStatus = currentStatus === "posted" ? "planned" : "posted";
@@ -1895,6 +1944,7 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
               <SerienTab series={series} reels={reels}
                 onOpenReel={(reel,brand)=>setDetailReel({reel,brand})}
                 onToggleStatus={handleToggleStatus}
+                role={role} onAdd={handleAddSeries} onDelete={handleDeleteSeries}
                 saving={saving}/>
             )}
             {tab==="briefing" && (

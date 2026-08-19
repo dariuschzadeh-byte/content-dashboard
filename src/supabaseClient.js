@@ -83,6 +83,21 @@ export async function fetchSeries() {
   return data;
 }
 
+// Admin only (RLS enforces it): add / remove a series.
+export async function addSeries(s) {
+  const { data, error } = await supabase
+    .from("series")
+    .insert([{ id: s.id, name: s.name, brand: s.brand, color: s.color, parts: parseInt(s.parts) || 1 }])
+    .select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteSeries(id) {
+  const { error } = await supabase.from("series").delete().eq("id", id);
+  if (error) throw error;
+}
+
 
 // ── REELS ─────────────────────────────────────────────────────
 
