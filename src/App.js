@@ -14,7 +14,10 @@ import {
   updateReelStatus, updateStorySlot, updateStorySlotStatus,
   saveAnalytics, bulkImportReels, bulkImportStories,
   updateReelDriveLink, updateReelPostedAt,
+  fetchAnalyticsForReel, fetchProfiles,
+  signOut, getSession, onAuthChange, getMyProfile,
 } from "./supabaseClient";
+import Auth from "./Auth";
 
 // ── Colors ────────────────────────────────────────────────────
 const FRANZ  = "#C4527A";
@@ -559,6 +562,10 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
   const sObj  = reel.type==="SERIES" ? series.find(s=>s.id===reel.series_id) : null;
   const tc    = sObj?.color || color;
   const [av, setAv] = useState({ views:analytics?.views||"", likes:analytics?.likes||"", shares:analytics?.shares||"", saves:analytics?.saves||"" });
+  // Analytics is loaded lazily after the modal opens — sync the form when it arrives.
+  useEffect(() => {
+    setAv({ views:analytics?.views||"", likes:analytics?.likes||"", shares:analytics?.shares||"", saves:analytics?.saves||"" });
+  }, [analytics]);
 
   const IB = ({ label, value }) => value ? (
     <div style={{ marginBottom:16 }}>
@@ -1380,7 +1387,7 @@ function BriefingTab() {
   );
 }
 
-export default function Dashboard() {
+function Dashboard({ user, role = "creator", profiles = {} }) {
   const m = useIsMobile();
 
   const [reels,   setReels]   = useState([]);
@@ -1400,7 +1407,18 @@ export default function Dashboard() {
   const [editSlot,     setEditSlot]     = useState(null);
   const [editVal,      setEditVal]      = useState("");
   const [detailReel,   setDetailReel]   = useState(null);
+  const [detailAnalytics, setDetailAnalytics] = useState(null);
   const [calendarDay,  setCalendarDay]  = useState(null);
+
+  // Lazy-load analytics only when a reel detail opens (kept out of the main load).
+  useEffect(() => {
+    if (!detailReel) { setDetailAnalytics(null); return; }
+    let active = true;
+    fetchAnalyticsForReel(detailReel.reel.id)
+      .then(a => { if (active) setDetailAnalytics(a); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [detailReel]);
   const [showBulk,     setShowBulk]     = useState(false);
   const [bulkFile,     setBulkFile]     = useState(null);
   const [bulkPreview,  setBulkPreview]  = useState(null);
@@ -1599,7 +1617,7 @@ export default function Dashboard() {
           onSetStatus={handleSetStatus}
           onUpdateDriveLink={handleUpdateDriveLink}
           saving={saving}
-          analytics={detailReel.reel.analytics?.[0]}
+          analytics={detailAnalytics}
           onSaveAnalytics={handleSaveAnalytics}/>
       )}
       {calendarDay && (
@@ -1664,7 +1682,18 @@ export default function Dashboard() {
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
             <div style={{ padding:"12px 16px", background:`${FRANZ}0F`, border:`1px solid ${FRANZ}33`, borderRadius:10 }}>
               <div style={{ fontSize:11, color:FRANZ, fontFamily:"monospace", fontWeight:700, marginBottom:6 }}>CSV FORMAT</div>
-              <div style={{ fontSize:12, color:TEXT, fontFamily:"monospace", lineHeight:1.8 }}>Spalten: <b>type, brand, date, title, caption, hook, description, format, notes, series, part</b><br/>type = REEL | SERIES | STORY · brand = franz | tgc · date = YYYY-MM-DD</div>
+              <div style={{ fontSize:12, color:TEXT, fontFamily:"monospace", lineHeight:1.8 }}>Columns: <b>type, brand, date, title, hook, description, format, caption, notes, series, part, morning, midday, evening</b><br/>type = REEL | SERIES | STORY · brand = franz | tgc · date = YYYY-MM-DD</div>
+              <button onClick={()=>{
+                const tpl = [
+                  "type,brand,date,title,hook,description,format,caption,notes,series,part,morning,midday,evening",
+                  'REEL,franz,2026-09-01,Morning Light Pour,she opens quietly,"7-shot sequence 12s: door opens, POV walk-in, cinnamon roll close-up, iced matcha pour, wide golden light, end logo",Pure Visual / ASMR,she\'s open. pererenan.,Audio: trending sound,,,,,',
+                  'SERIES,franz,2026-09-02,The Perfect Roll E1,what do they taste like,"18s ASMR pull-apart: tray steam, plate slide, slow tear filling stretch, bite mark, end card",ASMR + Texture,ep 01: the pull.,Audio: original sound,perfect_roll,1,,,',
+                  "STORY,tgc,2026-09-01,,,,,,,,,Morning story text,Midday story text,Evening story text",
+                ].join("\n");
+                const url = URL.createObjectURL(new Blob([tpl], { type:"text/csv" }));
+                const a = document.createElement("a"); a.href=url; a.download="content_template.csv"; a.click();
+                URL.revokeObjectURL(url);
+              }} style={{ marginTop:10, padding:"7px 14px", borderRadius:6, border:`1px solid ${FRANZ}`, background:CARD, color:FRANZ, fontSize:11, fontFamily:"monospace", fontWeight:700, cursor:"pointer" }}>⬇ Download template</button>
             </div>
             <div style={{ border:`2px dashed ${BORDER}`, borderRadius:10, padding:24, textAlign:"center" }}>
               <input type="file" accept=".csv" onChange={handleBulkFile} style={{ display:"none" }} id="csvInput"/>
@@ -1687,6 +1716,14 @@ export default function Dashboard() {
             <div style={{ fontSize:m?14:18, fontWeight:700, color:TEXT }}>Content Dashboard</div>
             {!m && <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace" }}>Franz & The Green Collective</div>}
           </div>
+          {user && (
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginLeft:m?0:8 }}>
+              <span style={{ fontSize:m?9:11, color:MUTED, fontFamily:"monospace", maxWidth:m?70:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={(profiles[user.id]?.name)||user.email}>
+                {role==="admin" ? "★ " : ""}{(profiles[user.id]?.name) || user.email}
+              </span>
+              <button onClick={()=>signOut()} title="Log out" style={{ padding:"5px 10px", borderRadius:6, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:m?9:10, fontFamily:"monospace", cursor:"pointer" }}>{m?"⎋":"LOGOUT"}</button>
+            </div>
+          )}
         </div>
         {!m ? (
           <div style={{ display:"flex", gap:4, alignItems:"center" }}>
@@ -1883,4 +1920,31 @@ export default function Dashboard() {
       <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
     </div>
   );
+}
+// ══════════════════════════════════════════════════════════════
+// AppGate — top-level: requires login, then renders the Dashboard.
+// ══════════════════════════════════════════════════════════════
+export default function AppGate() {
+  const [session, setSession]   = useState(undefined); // undefined = still checking
+  const [profile, setProfile]   = useState(null);
+  const [profiles, setProfiles] = useState({});
+
+  useEffect(() => {
+    getSession().then(setSession).catch(() => setSession(null));
+    const unsub = onAuthChange((s) => setSession(s));
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    if (!session) { setProfile(null); return; }
+    getMyProfile().then(setProfile).catch(() => {});
+    fetchProfiles().then(setProfiles).catch(() => {});
+  }, [session]);
+
+  if (session === undefined) {
+    return <div style={{ minHeight:"100vh", background:BG, display:"flex", alignItems:"center", justifyContent:"center", color:MUTED, fontFamily:"monospace" }}>Loading…</div>;
+  }
+  if (!session) return <Auth />;
+
+  return <Dashboard user={session.user} role={profile?.role || "creator"} profiles={profiles} />;
 }

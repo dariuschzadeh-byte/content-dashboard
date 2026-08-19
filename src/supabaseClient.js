@@ -21,6 +21,57 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 
+// ── AUTH ──────────────────────────────────────────────────────
+// Login/Signup with email + password. Roles live in the `profiles`
+// table (admin | creator), created automatically on signup by a DB trigger.
+
+export async function signIn(email, password) {
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+export async function signUp(email, password, name) {
+  const { data, error } = await supabase.auth.signUp({
+    email, password, options: { data: { name } },
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function signOut() {
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
+}
+
+export async function getSession() {
+  const { data } = await supabase.auth.getSession();
+  return data.session;
+}
+
+export function onAuthChange(cb) {
+  const { data } = supabase.auth.onAuthStateChange((_e, session) => cb(session));
+  return () => data.subscription.unsubscribe();
+}
+
+// Current user's profile (role/name). Falls back to a creator profile.
+export async function getMyProfile() {
+  const { data: u } = await supabase.auth.getUser();
+  if (!u?.user) return null;
+  const { data, error } = await supabase
+    .from("profiles").select("*").eq("id", u.user.id).single();
+  if (error && error.code !== "PGRST116") throw error;
+  return data || { id: u.user.id, role: "creator", name: u.user.email };
+}
+
+// Map of userId -> {name, role} to show "who created what".
+export async function fetchProfiles() {
+  const { data, error } = await supabase.from("profiles").select("id, name, role");
+  if (error) throw error;
+  return Object.fromEntries((data || []).map(p => [p.id, p]));
+}
+
+
 // ── SERIES ────────────────────────────────────────────────────
 
 export async function fetchSeries() {
@@ -35,13 +86,24 @@ export async function fetchSeries() {
 
 // ── REELS ─────────────────────────────────────────────────────
 
+// NOTE: analytics is intentionally NOT joined here — that join made the main
+// load heavier on every visit. Analytics is fetched lazily per reel only when
+// the detail/analytics view opens (see fetchAnalyticsForReel below).
 export async function fetchReels(brand = null) {
   let query = supabase
     .from("reels")
-    .select("*, analytics(*)")
+    .select("*")
     .order("date");
   if (brand) query = query.eq("brand", brand);
   const { data, error } = await query;
+  if (error) throw error;
+  return data;
+}
+
+// Lazy analytics — only when a reel's detail view is opened.
+export async function fetchAnalyticsForReel(reelId) {
+  const { data, error } = await supabase
+    .from("analytics").select("*").eq("reel_id", reelId).maybeSingle();
   if (error) throw error;
   return data;
 }
