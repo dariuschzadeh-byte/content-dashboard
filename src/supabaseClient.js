@@ -44,6 +44,12 @@ export async function signOut() {
   if (error) throw error;
 }
 
+// Change the logged-in user's own password.
+export async function changePassword(newPassword) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+}
+
 export async function getSession() {
   const { data } = await supabase.auth.getSession();
   return data.session;
@@ -190,6 +196,20 @@ export async function updateReelPostedAt(id, postedAt) {
     .eq("id", id)
     .select()
     .single();
+  if (error) throw error;
+  return data;
+}
+
+// General reel edit (title, caption, hook, description, format, notes, date, …).
+// Every logged-in user may edit (RLS: "auth update reels").
+export async function updateReel(id, fields) {
+  const allowed = ["title", "caption", "hook", "description", "format", "notes", "date", "type", "series_id", "part"];
+  const patch = {};
+  for (const k of allowed) {
+    if (k in fields) patch[k] = (fields[k] === "" && k !== "title") ? null : fields[k];
+  }
+  if ("part" in patch) patch.part = patch.part ? parseInt(patch.part) : null;
+  const { data, error } = await supabase.from("reels").update(patch).eq("id", id).select().single();
   if (error) throw error;
   return data;
 }

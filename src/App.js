@@ -17,6 +17,7 @@ import {
   updateReelDriveLink, updateReelPostedAt,
   fetchAnalyticsForReel, fetchProfiles,
   signOut, getSession, onAuthChange, getMyProfile,
+  updateReel, changePassword,
 } from "./supabaseClient";
 import Auth from "./Auth";
 
@@ -589,7 +590,21 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving, role, on
 // ══════════════════════════════════════════════════════════════
 // REEL DETAIL MODAL
 // ══════════════════════════════════════════════════════════════
-function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus, onUpdateDriveLink, saving, analytics, onSaveAnalytics }) {
+// Editable field row for the reel edit form. Module-level so it keeps input
+// focus while typing (a component defined inside a parent remounts each render).
+function EditRow({ label, value, onChange, area }) {
+  const base = { width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${BORDER}`, fontSize:14, boxSizing:"border-box", background:"#FCFAF6", color:TEXT };
+  return (
+    <div>
+      <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:5 }}>{label}</div>
+      {area
+        ? <textarea value={value} onChange={e=>onChange(e.target.value)} rows={3} style={{ ...base, fontFamily:"inherit", resize:"vertical" }}/>
+        : <input value={value} onChange={e=>onChange(e.target.value)} style={base}/>}
+    </div>
+  );
+}
+
+function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus, onUpdateDriveLink, onUpdateReel, saving, analytics, onSaveAnalytics }) {
   const m     = useIsMobile();
   useSwipeBack(onClose);
   const color = bc(brand);
@@ -600,6 +615,19 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
   useEffect(() => {
     setAv({ views:analytics?.views||"", likes:analytics?.likes||"", shares:analytics?.shares||"", saves:analytics?.saves||"" });
   }, [analytics]);
+
+  // Inline edit of the reel's content (title, hook, caption, …). Any logged-in user may edit.
+  const [editing, setEditing] = useState(false);
+  const [ef, setEf] = useState({ title:reel.title||"", hook:reel.hook||"", description:reel.description||"", format:reel.format||"", caption:reel.caption||"", notes:reel.notes||"" });
+  useEffect(() => {
+    setEf({ title:reel.title||"", hook:reel.hook||"", description:reel.description||"", format:reel.format||"", caption:reel.caption||"", notes:reel.notes||"" });
+    setEditing(false);
+  }, [reel.id]);
+  const saveEdit = async () => {
+    if (!ef.title.trim() || !onUpdateReel) return;
+    await onUpdateReel(reel.id, ef);
+    setEditing(false);
+  };
 
   const IB = ({ label, value }) => value ? (
     <div style={{ marginBottom:16 }}>
@@ -622,25 +650,48 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
             </div>
             <div style={{ fontSize:m?20:24, fontWeight:700, color:TEXT }}>{reel.title}</div>
           </div>
-          <button onClick={onClose} style={{ background:"none", border:"none", color:MUTED, fontSize:22, cursor:"pointer", padding:"12px", lineHeight:1, flexShrink:0, minWidth:48, minHeight:48, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:8 }}>✕</button>
+          <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+            {onUpdateReel && !editing && (
+              <button onClick={()=>setEditing(true)} title="Edit" style={{ background:"none", border:`1px solid ${BORDER}`, color:MUTED, fontSize:13, cursor:"pointer", padding:"0 12px", height:44, borderRadius:8, fontFamily:"monospace" }}>✏️ Edit</button>
+            )}
+            <button onClick={onClose} style={{ background:"none", border:"none", color:MUTED, fontSize:22, cursor:"pointer", padding:"12px", lineHeight:1, minWidth:48, minHeight:48, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:8 }}>✕</button>
+          </div>
         </div>
 
         <div style={{ height:1, background:BORDER, marginBottom:20 }}/>
-        <IB label="Hook – erste 2 Sekunden" value={reel.hook}/>
-        <IB label="What to film" value={reel.description}/>
-        <IB label="Format & Style" value={reel.format}/>
 
-        {reel.notes && (
-          <div style={{ marginBottom:16, padding:"14px 16px", background:`${color}0F`, border:`1px solid ${color}33`, borderRadius:10 }}>
-            <div style={{ fontSize:10, color, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:6 }}>Director's Note</div>
-            <div style={{ fontSize:13, color:TEXT, lineHeight:1.7, fontStyle:"italic" }}>{reel.notes}</div>
+        {editing ? (
+          <div style={{ marginBottom:20, display:"flex", flexDirection:"column", gap:12 }}>
+            <EditRow label="Title" value={ef.title} onChange={v=>setEf(p=>({...p,title:v}))}/>
+            <EditRow label="Hook – erste 2 Sekunden" value={ef.hook} onChange={v=>setEf(p=>({...p,hook:v}))} area/>
+            <EditRow label="What to film" value={ef.description} onChange={v=>setEf(p=>({...p,description:v}))} area/>
+            <EditRow label="Format & Style" value={ef.format} onChange={v=>setEf(p=>({...p,format:v}))} area/>
+            <EditRow label="Caption" value={ef.caption} onChange={v=>setEf(p=>({...p,caption:v}))} area/>
+            <EditRow label="Director's Note" value={ef.notes} onChange={v=>setEf(p=>({...p,notes:v}))} area/>
+            <div style={{ display:"flex", gap:8, marginTop:4 }}>
+              <button onClick={saveEdit} disabled={saving} style={{ padding:"11px 20px", borderRadius:8, border:"none", background:TEXT, color:BG, fontSize:14, fontWeight:600, cursor:saving?"default":"pointer", opacity:saving?0.6:1 }}>{saving?"Saving…":"Save"}</button>
+              <button onClick={()=>setEditing(false)} style={{ padding:"11px 16px", borderRadius:8, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:14, cursor:"pointer" }}>Cancel</button>
+            </div>
           </div>
-        )}
+        ) : (
+          <>
+            <IB label="Hook – erste 2 Sekunden" value={reel.hook}/>
+            <IB label="What to film" value={reel.description}/>
+            <IB label="Format & Style" value={reel.format}/>
 
-        <div style={{ marginBottom:16, padding:"12px 16px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10 }}>
-          <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:6 }}>Caption</div>
-          <div style={{ fontSize:14, color:TEXT, fontStyle:"italic" }}>"{reel.caption}"</div>
-        </div>
+            {reel.notes && (
+              <div style={{ marginBottom:16, padding:"14px 16px", background:`${color}0F`, border:`1px solid ${color}33`, borderRadius:10 }}>
+                <div style={{ fontSize:10, color, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:6 }}>Director's Note</div>
+                <div style={{ fontSize:13, color:TEXT, lineHeight:1.7, fontStyle:"italic" }}>{reel.notes}</div>
+              </div>
+            )}
+
+            <div style={{ marginBottom:16, padding:"12px 16px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10 }}>
+              <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:6 }}>Caption</div>
+              <div style={{ fontSize:14, color:TEXT, fontStyle:"italic" }}>"{reel.caption}"</div>
+            </div>
+          </>
+        )}
 
         {/* Status — any of the 3 stages can be clicked to set directly */}
         <div style={{ marginBottom:20 }}>
@@ -1456,6 +1507,9 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
   const [showBulk,     setShowBulk]     = useState(false);
   const [bulkFile,     setBulkFile]     = useState(null);
   const [bulkPreview,  setBulkPreview]  = useState(null);
+  const [showPwd,      setShowPwd]      = useState(false);
+  const [newPwd,       setNewPwd]       = useState("");
+  const [pwdMsg,       setPwdMsg]       = useState(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true); setError(null);
@@ -1555,6 +1609,28 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
     setSeries(p => p.filter(s => s.id !== id));
     try { await deleteSeries(id); }
     catch(e){ setSeries(prevList); setError("Delete series failed: " + e.message); }
+  };
+
+  // Edit a reel's content (title/hook/caption/…) — any logged-in user.
+  const handleUpdateReel = async (id, fields) => {
+    setSaving(true); setError(null);
+    try {
+      const updated = await updateReel(id, fields);
+      setReels(prev => prev.map(r => r.id===id ? {...r, ...updated} : r));
+    } catch(e){ setError("Update failed: " + e.message); }
+    finally { setSaving(false); }
+  };
+
+  // Change own password.
+  const handleChangePassword = async () => {
+    if (newPwd.length < 6) { setPwdMsg("Password must be at least 6 characters."); return; }
+    setSaving(true); setPwdMsg(null);
+    try {
+      await changePassword(newPwd);
+      setPwdMsg("Password updated ✓"); setNewPwd("");
+      setTimeout(() => { setShowPwd(false); setPwdMsg(null); }, 1200);
+    } catch(e){ setPwdMsg(e.message); }
+    finally { setSaving(false); }
   };
 
   const handleToggleStory = async (id, slot, currentStatus) => {
@@ -1665,6 +1741,7 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
           onToggleStatus={handleToggleStatus}
           onSetStatus={handleSetStatus}
           onUpdateDriveLink={handleUpdateDriveLink}
+          onUpdateReel={handleUpdateReel}
           saving={saving}
           analytics={detailAnalytics}
           onSaveAnalytics={handleSaveAnalytics}/>
@@ -1726,6 +1803,17 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
           <textarea value={editVal} onChange={e=>setEditVal(e.target.value)} style={{ width:"100%", minHeight:120, padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:8, color:TEXT, fontSize:14, fontFamily:"monospace", resize:"vertical", boxSizing:"border-box" }}/>
         </Modal>
       )}
+      {showPwd && (
+        <Modal title="Change password" onClose={()=>{setShowPwd(false);setNewPwd("");setPwdMsg(null);}} onSave={handleChangePassword} saving={saving}>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <div style={{ fontSize:13, color:MUTED }}>Set a new password for your account ({user?.email}).</div>
+            <input type="password" placeholder="New password (min. 6 characters)" value={newPwd} onChange={e=>setNewPwd(e.target.value)} autoComplete="new-password"
+              style={{ padding:"11px 13px", borderRadius:8, border:`1px solid ${BORDER}`, fontSize:14, boxSizing:"border-box" }}/>
+            {pwdMsg && <div style={{ fontSize:13, color: pwdMsg.includes("✓")?GREEN:"#DC2626" }}>{pwdMsg}</div>}
+          </div>
+        </Modal>
+      )}
+
       {showBulk && (
         <Modal title="Bulk Import — CSV" onClose={()=>{setShowBulk(false);setBulkFile(null);setBulkPreview(null);}} onSave={bulkFile?handleBulkImport:null} saving={saving} wide>
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
@@ -1770,6 +1858,7 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
               <span style={{ fontSize:m?9:11, color:MUTED, fontFamily:"monospace", maxWidth:m?70:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={(profiles[user.id]?.name)||user.email}>
                 {role==="admin" ? "★ " : ""}{(profiles[user.id]?.name) || user.email}
               </span>
+              <button onClick={()=>{setShowPwd(true);setPwdMsg(null);}} title="Change password" style={{ padding:"5px 10px", borderRadius:6, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:m?9:10, fontFamily:"monospace", cursor:"pointer" }}>{m?"🔑":"PASSWORT"}</button>
               <button onClick={()=>signOut()} title="Log out" style={{ padding:"5px 10px", borderRadius:6, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:m?9:10, fontFamily:"monospace", cursor:"pointer" }}>{m?"⎋":"LOGOUT"}</button>
             </div>
           )}
