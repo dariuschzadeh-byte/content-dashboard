@@ -139,7 +139,7 @@ function normalizeBulkRows(text, defaultBrand = "franz") {
   const keyOf = (h) => (h || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const headers = raw[0].map(keyOf);
   const FIELD = (k) => {
-    if (k === "date") return "date";
+    if (k === "date" || k === "postingdate") return "date";
     if (k === "owner" || k === "assignee") return "assignee";
     if (k === "pillar") return "pillar";
     if (k === "format") return "format";
@@ -150,7 +150,8 @@ function normalizeBulkRows(text, defaultBrand = "franz") {
     if (k === "caption") return "caption";
     if (k === "note" || k === "notes" || k === "directorsnote") return "notes";
     if (k === "approvedby" || k === "approved") return "approvedRaw";
-    if (k.includes("length")) return "est_length";
+    // "Estimated Lenght" — the sheet's spelling, kept working on purpose.
+    if (k.includes("length") || k.includes("lenght")) return "est_length";
     if (["type","brand","series","part","morning","midday","evening"].includes(k)) return k;
     return null;
   };
@@ -166,7 +167,10 @@ function normalizeBulkRows(text, defaultBrand = "franz") {
       storiesOut.push({ brand: o.brand || defaultBrand, date, morning: o.morning || "", midday: o.midday || "", evening: o.evening || "" });
       return;
     }
-    if (!o.title) { errors.push(`Row ${line}: missing title.`); return; }
+    // The sheet often leaves "Working Title" blank and carries the idea in
+    // "Concept" — fall back to it instead of dropping the row.
+    if (!o.title && o.description) { o.title = o.description.split(/[.\n]/)[0].trim().slice(0, 90); }
+    if (!o.title) { errors.push(`Row ${line}: no title and no concept — skipped.`); return; }
     const apr = (o.approvedRaw || "").toLowerCase();
     reelsOut.push({
       brand: o.brand || defaultBrand, date,
