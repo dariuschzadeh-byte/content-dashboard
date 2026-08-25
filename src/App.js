@@ -694,10 +694,15 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
   const sObj  = reel.type==="SERIES" ? series.find(s=>s.id===reel.series_id) : null;
   const tc    = sObj?.color || color;
   const [av, setAv] = useState({ views:analytics?.views||"", likes:analytics?.likes||"", comments:analytics?.comments||"", shares:analytics?.shares||"", saves:analytics?.saves||"" });
-  // Analytics is loaded lazily after the modal opens — sync the form when it arrives.
+  // Analytics arrives one round trip after the modal opens. Only seed the form
+  // from it while the user hasn't typed yet — otherwise the late response would
+  // wipe numbers they already entered.
+  const avTouched = useRef(false);
   useEffect(() => {
+    if (avTouched.current) return;
     setAv({ views:analytics?.views||"", likes:analytics?.likes||"", comments:analytics?.comments||"", shares:analytics?.shares||"", saves:analytics?.saves||"" });
   }, [analytics]);
+  useEffect(() => { avTouched.current = false; }, [reel.id]);
 
   // Inline edit of the reel's content (title, hook, caption, …). Any logged-in user may edit.
   const [editing, setEditing] = useState(false);
@@ -933,7 +938,7 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
             {["views","likes","comments","shares","saves"].map(metric => (
               <div key={metric}>
                 <div style={{ fontSize:9, color:MUTED, fontFamily:F_MONO, textTransform:"uppercase", marginBottom:4 }}>{metric}</div>
-                <input type="number" placeholder="—" value={av[metric]} onChange={e => setAv(p=>({...p,[metric]:e.target.value}))}
+                <input type="number" placeholder="—" value={av[metric]} onChange={e => { avTouched.current = true; setAv(p=>({...p,[metric]:e.target.value})); }}
                   style={{ width:"100%", padding:"10px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:6, color:TEXT, fontSize:14, fontFamily:F_MONO, boxSizing:"border-box", minHeight:44 }}/>
               </div>
             ))}

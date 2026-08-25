@@ -35,10 +35,15 @@ export default function AnalyticsPage({ reels, anMap, loading, onOpenReel, m }) 
   });
 
   // Weekly trend (by posted_at/date, last 8 weeks with any data).
+  // Monday of that week. Parsed and formatted in LOCAL time on purpose —
+  // mixing UTC parsing with local day math shifted buckets by a day for
+  // viewers west of UTC.
   const weekOf = (iso) => {
-    const d = new Date(iso); const day = (d.getDay() + 6) % 7;
-    d.setDate(d.getDate() - day);
-    return d.toISOString().slice(0, 10);
+    const [y, mo, da] = iso.split("-").map(Number);
+    const d = new Date(y, mo - 1, da);
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    const p2 = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
   };
   const trend = {};
   withData.forEach(r => {
@@ -49,42 +54,21 @@ export default function AnalyticsPage({ reels, anMap, loading, onOpenReel, m }) 
   const seen = Object.keys(trend).sort();
   let trendWeeks = seen;
   if (seen.length >= 2) {
-    const out = []; const cur = new Date(seen[0]); const end = new Date(seen[seen.length - 1]);
-    while (cur <= end && out.length < 26) { out.push(cur.toISOString().slice(0, 10)); cur.setDate(cur.getDate() + 7); }
+    const mk = (iso) => { const [y, mo, da] = iso.split("-").map(Number); return new Date(y, mo - 1, da); };
+    const p2 = (n) => String(n).padStart(2, "0");
+    const out = []; const cur = mk(seen[0]); const end = mk(seen[seen.length - 1]);
+    while (cur <= end && out.length < 26) {
+      out.push(`${cur.getFullYear()}-${p2(cur.getMonth() + 1)}-${p2(cur.getDate())}`);
+      cur.setDate(cur.getDate() + 7);
+    }
     trendWeeks = out.slice(-8);
   }
   const trendMax = Math.max(1, ...trendWeeks.map(w => trend[w] || 0));
 
-  const Section = ({ label, children, right }) => (
-    <div style={{ marginBottom: m ? 18 : 26 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <div style={LBL}>{label}</div>{right}
-      </div>
-      {children}
-    </div>
-  );
-
-  const PerfCard = ({ label, r, color }) => (
-    <div onClick={() => onOpenReel(r, r.brand)}
-      style={{ background: CARD, border: `1px solid ${BORDER}`, borderLeft: `4px solid ${color}`, borderRadius: 12, padding: m ? 14 : 18, cursor: "pointer", minWidth: 0 }}>
-      <div style={{ ...LBL, fontSize: 10, color, marginBottom: 8 }}>{label}</div>
-      <div style={{ fontSize: 16, fontWeight: 700, color: TEXT, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12, color: MUTED }}>{formatDate(r.date)}</span>
-        {r.assignee && <Chip text={r.assignee} color={aColor(r.assignee)} />}
-      </div>
-      <div style={{ display: "flex", gap: m ? 12 : 18, flexWrap: "wrap" }}>
-        {[["Views", r.an.views], ["Likes", r.an.likes], ["Comments", r.an.comments], ["Saves", r.an.saves]].map(([l, v]) => (
-          <div key={l}><div style={{ fontSize: 18, fontWeight: 700, color: TEXT }}>{fmtNum(v || 0)}</div><div style={{ fontSize: 10.5, color: MUTED }}>{l}</div></div>
-        ))}
-      </div>
-    </div>
-  );
-
   return (
     <div>
       {/* Account links */}
-      <Section label="Accounts">
+      <Section m={m} label="Accounts">
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {SOCIALS.instagram
             ? <a href={SOCIALS.instagram} target="_blank" rel="noopener noreferrer" style={{ padding: "10px 18px", borderRadius: 10, background: TEXT, color: "#fff", textDecoration: "none", fontSize: 13, fontWeight: 600 }}>📷 Instagram</a>
@@ -101,7 +85,7 @@ export default function AnalyticsPage({ reels, anMap, loading, onOpenReel, m }) 
       </Section>
 
       {/* KPI totals */}
-      <Section label={`Performance · ${withData.length} of ${posted.length} posted reels tracked`}>
+      <Section m={m} label={`Performance · ${withData.length} of ${posted.length} posted reels tracked`}>
         <div style={{ display: "grid", gridTemplateColumns: m ? "1fr 1fr" : "repeat(4, 1fr)", gap: m ? 8 : 12 }}>
           <Stat m={m} label="Total views" value={fmtNum(totals.views)} />
           <Stat m={m} label="Likes" value={fmtNum(totals.likes)} />
@@ -114,17 +98,17 @@ export default function AnalyticsPage({ reels, anMap, loading, onOpenReel, m }) 
 
       {/* Best / worst */}
       {best && (
-        <Section label="Highlights">
+        <Section m={m} label="Highlights">
           <div style={{ display: "grid", gridTemplateColumns: m ? "1fr" : "1fr 1fr", gap: m ? 8 : 12 }}>
-            <PerfCard label="★ Best performer" r={best} color={GREEN} />
-            {worst && worst.id !== best.id && <PerfCard label="Needs a look — lowest views" r={worst} color={RED} />}
+            <PerfCard m={m} onOpenReel={onOpenReel} label="★ Best performer" r={best} color={GREEN} />
+            {worst && worst.id !== best.id && <PerfCard m={m} onOpenReel={onOpenReel} label="Needs a look — lowest views" r={worst} color={RED} />}
           </div>
         </Section>
       )}
 
       {/* Weekly trend */}
       {trendWeeks.length >= 2 && (
-        <Section label="Views per week (posted content)">
+        <Section m={m} label="Views per week (posted content)">
           <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 12, padding: m ? 14 : 18 }}>
             <div style={{ display: "flex", alignItems: "flex-end", gap: m ? 6 : 12, height: 120 }}>
               {trendWeeks.map(w => (
@@ -141,7 +125,7 @@ export default function AnalyticsPage({ reels, anMap, loading, onOpenReel, m }) 
 
       {/* Per-creator performance */}
       {Object.keys(byCreator).length > 0 && (
-        <Section label="By creator">
+        <Section m={m} label="By creator">
           <div style={{ display: "grid", gridTemplateColumns: m ? "1fr" : `repeat(${Math.min(Object.keys(byCreator).length, 3)}, 1fr)`, gap: m ? 8 : 12 }}>
             {Object.keys(byCreator).sort().map(name => {
               const list = byCreator[name];
@@ -164,7 +148,7 @@ export default function AnalyticsPage({ reels, anMap, loading, onOpenReel, m }) 
       )}
 
       {/* All posted reels */}
-      <Section label="All posted reels">
+      <Section m={m} label="All posted reels">
         {rows.length === 0
           ? <div style={{ padding: "14px 16px", background: SOFT, border: `1px dashed ${BORDER}`, borderRadius: 10, color: MUTED, fontSize: 13.5 }}>No posted reels yet — metrics appear once content goes live.</div>
           : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -190,6 +174,37 @@ export default function AnalyticsPage({ reels, anMap, loading, onOpenReel, m }) 
         Metrics are entered per reel (open a reel → Performance). Automatic Instagram/TikTok sync
         requires their official APIs (Meta business verification + TikTok developer access) — that's
         a separate setup we can do later; the page is already built for it.
+      </div>
+    </div>
+  );
+}
+
+// Module-level: keeps component identity stable across renders.
+function Section({ label, children, right, m }) {
+  return (
+    <div style={{ marginBottom: m ? 18 : 26 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <div style={LBL}>{label}</div>{right}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function PerfCard({ label, r, color, m, onOpenReel }) {
+  return (
+    <div onClick={() => onOpenReel(r, r.brand)}
+      style={{ background: CARD, border: `1px solid ${BORDER}`, borderLeft: `4px solid ${color}`, borderRadius: 12, padding: m ? 14 : 18, cursor: "pointer", minWidth: 0 }}>
+      <div style={{ ...LBL, fontSize: 10, color, marginBottom: 8 }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: TEXT, marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, color: MUTED }}>{formatDate(r.date)}</span>
+        {r.assignee && <Chip text={r.assignee} color={aColor(r.assignee)} />}
+      </div>
+      <div style={{ display: "flex", gap: m ? 12 : 18, flexWrap: "wrap" }}>
+        {[["Views", r.an.views], ["Likes", r.an.likes], ["Comments", r.an.comments], ["Saves", r.an.saves]].map(([l, v]) => (
+          <div key={l}><div style={{ fontSize: 18, fontWeight: 700, color: TEXT }}>{fmtNum(v || 0)}</div><div style={{ fontSize: 10.5, color: MUTED }}>{l}</div></div>
+        ))}
       </div>
     </div>
   );
