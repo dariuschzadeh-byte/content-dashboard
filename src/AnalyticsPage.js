@@ -11,7 +11,7 @@ import {
 
 const sum = (list, k) => list.reduce((acc, x) => acc + (x.an?.[k] || 0), 0);
 
-export default function AnalyticsPage({ reels, anMap, loading, onOpenReel, m }) {
+export default function AnalyticsPage({ reels, anMap, loading, onOpenReel, role, m }) {
   const posted = reels.filter(r => r.status === "posted");
   // Pair each posted reel with its metrics (if entered).
   const rows = posted.map(r => ({ ...r, an: anMap?.[r.id] || null }));
@@ -22,7 +22,13 @@ export default function AnalyticsPage({ reels, anMap, loading, onOpenReel, m }) 
     comments: sum(withData, "comments"), saves: sum(withData, "saves"),
   };
 
+  const engagement = (r) => {
+    const v = r.an?.views || 0;
+    if (!v) return null;
+    return ((r.an.likes || 0) + (r.an.comments || 0) + (r.an.saves || 0) + (r.an.shares || 0)) / v * 100;
+  };
   const ranked = [...withData].sort((a, b) => (b.an.views || 0) - (a.an.views || 0));
+  const avgViews = withData.length ? Math.round(totals.views / withData.length) : 0;
   const best = ranked[0] || null;
   const worst = ranked.length >= 2 ? ranked[ranked.length - 1] : null;
 
@@ -92,6 +98,11 @@ export default function AnalyticsPage({ reels, anMap, loading, onOpenReel, m }) 
           <Stat m={m} label="Comments" value={fmtNum(totals.comments)} />
           <Stat m={m} label="Saves" value={fmtNum(totals.saves)} />
         </div>
+        {withData.length > 0 && (
+          <div style={{ fontSize: 12.5, color: MUTED, marginTop: 10 }}>
+            Average {fmtNum(avgViews)} views per tracked reel.
+          </div>
+        )}
       </Section>
 
       {loading && <div style={{ color: MUTED, fontSize: 13, marginBottom: 16 }}>Loading metrics…</div>}
@@ -101,7 +112,7 @@ export default function AnalyticsPage({ reels, anMap, loading, onOpenReel, m }) 
         <Section m={m} label="Highlights">
           <div style={{ display: "grid", gridTemplateColumns: m ? "1fr" : "1fr 1fr", gap: m ? 8 : 12 }}>
             <PerfCard m={m} onOpenReel={onOpenReel} label="★ Best performer" r={best} color={GREEN} />
-            {worst && worst.id !== best.id && <PerfCard m={m} onOpenReel={onOpenReel} label="Needs a look — lowest views" r={worst} color={RED} />}
+            {worst && worst.id !== best.id && <PerfCard m={m} onOpenReel={onOpenReel} label="Lowest views" r={worst} color={RED} />}
           </div>
         </Section>
       )}
@@ -124,8 +135,8 @@ export default function AnalyticsPage({ reels, anMap, loading, onOpenReel, m }) 
       )}
 
       {/* Per-creator performance */}
-      {Object.keys(byCreator).length > 0 && (
-        <Section m={m} label="By creator">
+      {role === "admin" && Object.keys(byCreator).length > 0 && (
+        <Section m={m} label="By creator · admin view">
           <div style={{ display: "grid", gridTemplateColumns: m ? "1fr" : `repeat(${Math.min(Object.keys(byCreator).length, 3)}, 1fr)`, gap: m ? 8 : 12 }}>
             {Object.keys(byCreator).sort().map(name => {
               const list = byCreator[name];
@@ -148,23 +159,25 @@ export default function AnalyticsPage({ reels, anMap, loading, onOpenReel, m }) 
       )}
 
       {/* All posted reels */}
-      <Section m={m} label="All posted reels">
+      <Section m={m} label="Ranking — every posted reel by views">
         {rows.length === 0
           ? <div style={{ padding: "14px 16px", background: SOFT, border: `1px dashed ${BORDER}`, borderRadius: 10, color: MUTED, fontSize: 13.5 }}>No posted reels yet — metrics appear once content goes live.</div>
           : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {[...rows].sort((a, b) => (b.an?.views || 0) - (a.an?.views || 0)).map(r => (
+              {[...rows].sort((a, b) => (b.an?.views || 0) - (a.an?.views || 0)).map((r, i) => (
                 <div key={r.id} onClick={() => onOpenReel(r, r.brand)}
-                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: CARD, border: `1px solid ${BORDER}`, borderRadius: 10, cursor: "pointer", minWidth: 0 }}>
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: CARD, border: `1px solid ${BORDER}`, borderRadius: 12, cursor: "pointer", minWidth: 0 }}>
+                  <div style={{ width: 22, flexShrink: 0, fontSize: 12, fontWeight: 700, color: i < 3 && r.an ? TEXT : MUTED, textAlign: "center" }}>{r.an ? `${i + 1}` : "–"}</div>
                   <div style={{ width: 8, height: 8, borderRadius: "50%", background: bc(r.brand), flexShrink: 0 }} />
                   <div style={{ fontSize: 12, fontWeight: 700, color: TEXT, width: 46, flexShrink: 0 }}>{formatDate(r.date)}</div>
                   <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.title}</div>
                   {r.assignee && !m && <Chip text={r.assignee} color={aColor(r.assignee)} />}
                   {r.an
-                    ? <div style={{ display: "flex", gap: m ? 8 : 14, flexShrink: 0, fontFamily: F_BODY }}>
+                    ? <div style={{ display: "flex", gap: m ? 8 : 16, flexShrink: 0, fontFamily: F_BODY, alignItems: "baseline" }}>
                         <span style={{ fontSize: 13, fontWeight: 700, color: TEXT }}>{fmtNum(r.an.views || 0)} <span style={{ fontWeight: 400, color: MUTED, fontSize: 11 }}>views</span></span>
-                        {!m && <span style={{ fontSize: 13, fontWeight: 700, color: TEXT }}>{fmtNum(r.an.comments || 0)} <span style={{ fontWeight: 400, color: MUTED, fontSize: 11 }}>com.</span></span>}
+                        {!m && <span style={{ fontSize: 13, fontWeight: 700, color: TEXT }}>{fmtNum(r.an.comments || 0)} <span style={{ fontWeight: 400, color: MUTED, fontSize: 11 }}>comments</span></span>}
+                        {!m && engagement(r) != null && <span style={{ fontSize: 13, fontWeight: 700, color: TEXT }}>{engagement(r).toFixed(1)}% <span style={{ fontWeight: 400, color: MUTED, fontSize: 11 }}>engaged</span></span>}
                       </div>
-                    : <span style={{ fontSize: 11.5, color: MUTED, flexShrink: 0 }}>no data — tap to add</span>}
+                    : <span style={{ fontSize: 11.5, color: MUTED, flexShrink: 0 }}>no numbers yet — tap to add</span>}
                 </div>
               ))}
             </div>}

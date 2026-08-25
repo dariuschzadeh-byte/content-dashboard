@@ -5,23 +5,21 @@
 // ══════════════════════════════════════════════════════════════
 import { useState } from "react";
 import {
-  CARD, BORDER, TEXT, MUTED, SOFT, GREEN, AMBER, BUILD,
+  CARD, BORDER, TEXT, MUTED, SOFT, GREEN, AMBER,
   F_MONO, LBL, Chip, BrandDot, aColor, bc, brandName,
-  STATUS_FLOW, STATUS_LABEL, STATUS_COLOR, MONTH_NAMES,
+  STATUS_LABEL, STATUS_COLOR, MONTH_NAMES,
 } from "./theme";
 
 const pad = (n) => String(n).padStart(2, "0");
 const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
 export default function ContentPlan({
-  reels, brand, role, m,
-  onSetStatus, onOpenReel, onAdd, saving,
+  reels, brand, m, onOpenReel, onAdd,
 }) {
   const now = new Date();
   const [monthOff, setMonthOff] = useState(0);
   const [owner, setOwner] = useState("all");
   const [onlyOpen, setOnlyOpen] = useState(false);
-  const [openId, setOpenId] = useState(null);
 
   const view = new Date(now.getFullYear(), now.getMonth() + monthOff, 1);
   const prefix = `${view.getFullYear()}-${pad(view.getMonth() + 1)}`;
@@ -130,7 +128,6 @@ export default function ContentPlan({
                 {/* Reels of that day */}
                 <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
                   {day.items.map(r => {
-                    const open = openId === r.id;
                     const sColor = STATUS_COLOR[r.status];
                     return (
                       <div key={r.id} style={{
@@ -138,8 +135,8 @@ export default function ContentPlan({
                         borderLeft: `4px solid ${r.status === "posted" ? GREEN : r.status === "filmed" ? AMBER : bc(r.brand)}`,
                         borderRadius: 14, padding: m ? "12px 13px" : "14px 18px",
                       }}>
-                        {/* Row head */}
-                        <div onClick={() => setOpenId(open ? null : r.id)} style={{ cursor: "pointer", display: "flex", alignItems: "flex-start", gap: 10 }}>
+                        {/* The whole card opens the full reel card (same as from the calendar) */}
+                        <div onClick={() => onOpenReel && onOpenReel(r, r.brand)} style={{ cursor: "pointer", display: "flex", alignItems: "flex-start", gap: 10 }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4, flexWrap: "wrap" }}>
                               {brand === "all" && <BrandDot b={r.brand} />}
@@ -150,67 +147,17 @@ export default function ContentPlan({
                             </div>
                             <div style={{ fontSize: m ? 15 : 16, fontWeight: 700, color: TEXT, lineHeight: 1.35 }}>{r.title}</div>
                             {r.hook && (
-                              <div style={{ fontSize: 13, color: MUTED, fontStyle: "italic", marginTop: 3, ...(open ? {} : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }) }}>
+                              <div style={{ fontSize: 13, color: MUTED, fontStyle: "italic", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                 “{r.hook}”
                               </div>
                             )}
                           </div>
                           <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 8 }}>
                             <Chip text={STATUS_LABEL[r.status]} color={sColor} filled={r.status === "posted"} size={11.5} />
-                            <span style={{ color: MUTED, fontSize: 13 }}>{open ? "▲" : "▼"}</span>
+                            <span style={{ color: MUTED, fontSize: 13 }}>›</span>
                           </div>
                         </div>
 
-                        {/* Expanded: what's behind the reel */}
-                        {open && (
-                          <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${BORDER}`, display: "flex", flexDirection: "column", gap: 12 }}>
-                            {r.description && (
-                              <div>
-                                <div style={{ ...LBL, marginBottom: 5 }}>What to film</div>
-                                <div style={{ fontSize: 14, color: TEXT, lineHeight: 1.65 }}>{r.description}</div>
-                              </div>
-                            )}
-                            {(r.format || r.caption) && (
-                              <div style={{ display: "grid", gridTemplateColumns: m ? "1fr" : "1fr 1fr", gap: 12 }}>
-                                {r.format && <div><div style={{ ...LBL, marginBottom: 5 }}>Format &amp; style</div><div style={{ fontSize: 13.5, color: TEXT }}>{r.format}</div></div>}
-                                {r.caption && <div><div style={{ ...LBL, marginBottom: 5 }}>Caption</div><div style={{ fontSize: 13.5, color: TEXT, fontStyle: "italic" }}>“{r.caption}”</div></div>}
-                              </div>
-                            )}
-                            {r.notes && (
-                              <div style={{ background: SOFT, borderRadius: 10, padding: "11px 13px" }}>
-                                <div style={{ ...LBL, marginBottom: 5 }}>Director's note</div>
-                                <div style={{ fontSize: 13, color: TEXT, lineHeight: 1.6 }}>{r.notes}</div>
-                              </div>
-                            )}
-                            {r.reference_link && (
-                              <div>
-                                <div style={{ ...LBL, marginBottom: 5 }}>Reference</div>
-                                <a href={r.reference_link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: BUILD, wordBreak: "break-all" }}>{r.reference_link}</a>
-                              </div>
-                            )}
-
-                            {/* Status — the creator's own tracking */}
-                            <div>
-                              <div style={{ ...LBL, marginBottom: 7 }}>Mark your progress</div>
-                              <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-                                {STATUS_FLOW.map(st => (
-                                  <button key={st} disabled={saving} onClick={() => onSetStatus && onSetStatus(r.id, st)}
-                                    style={{ ...btn(r.status === st, STATUS_COLOR[st]), minHeight: 40 }}>
-                                    {st === "planned" ? "○ " : st === "filmed" ? "◑ " : "● "}{STATUS_LABEL[st]}
-                                  </button>
-                                ))}
-                                <button onClick={() => onOpenReel && onOpenReel(r, r.brand)} style={{ ...btn(false), minHeight: 40 }}>
-                                  Open details →
-                                </button>
-                              </div>
-                              {r.status === "posted" && r.posted_at && (
-                                <div style={{ fontSize: 12, color: GREEN, marginTop: 8, fontWeight: 600 }}>
-                                  ✓ Posted {new Date(r.posted_at).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
                       </div>
                     );
                   })}

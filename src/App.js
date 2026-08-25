@@ -26,7 +26,7 @@ import ContentPlan from "./ContentPlan";
 import {
   FRANZ, TGC, BUILD, BG, CARD, BORDER, TEXT, MUTED, SOFT, GREEN, AMBER, RED,
   F_BODY, F_DISPLAY, F_MONO, LBL, Chip, BrandDot, aColor, bc, brandName, formatDate, MONTH_NAMES,
-  STATUS_FLOW, STATUS_LABEL, STATUS_COLOR, STATUS_BG,
+  STATUS_FLOW, STATUS_LABEL, STATUS_COLOR, STATUS_BG, hashtagsFor,
 } from "./theme";
 
 // ── Drive Folder Links ────────────────────────────────────────
@@ -678,13 +678,31 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving, role, on
 // ══════════════════════════════════════════════════════════════
 // REEL DETAIL MODAL
 // ══════════════════════════════════════════════════════════════
+const OWNERS  = ["Ando", "Yugo"];
+const PILLARS = ["Process", "BTS", "USP", "Episode", "Storytelling", "Photobooth", "Filler"];
+
+// Dropdown variant of EditRow — used where the value comes from a fixed list.
+function EditSelect({ label, value, onChange, options }) {
+  return (
+    <div>
+      <div style={{ ...LBL, fontSize: 10, marginBottom: 5 }}>{label}</div>
+      <select value={value || ""} onChange={e => onChange(e.target.value)}
+        style={{ width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${BORDER}`, fontSize:14, boxSizing:"border-box", background:BG, color:TEXT, minHeight:42 }}>
+        <option value="">—</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+        {value && !options.includes(value) && <option value={value}>{value}</option>}
+      </select>
+    </div>
+  );
+}
+
 // Editable field row for the reel edit form. Module-level so it keeps input
 // focus while typing (a component defined inside a parent remounts each render).
 function EditRow({ label, value, onChange, area }) {
   const base = { width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${BORDER}`, fontSize:14, boxSizing:"border-box", background:"#FCFAF6", color:TEXT };
   return (
     <div>
-      <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:F_MONO, marginBottom:5 }}>{label}</div>
+      <div style={{ ...LBL, fontSize:10, marginBottom:5 }}>{label}</div>
       {area
         ? <textarea value={value} onChange={e=>onChange(e.target.value)} rows={3} style={{ ...base, fontFamily:"inherit", resize:"vertical" }}/>
         : <input value={value} onChange={e=>onChange(e.target.value)} style={base}/>}
@@ -756,7 +774,7 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
           </div>
           <div style={{ display:"flex", gap:6, flexShrink:0 }}>
             {onUpdateReel && !editing && (
-              <button onClick={()=>setEditing(true)} title="Edit" style={{ background:"none", border:`1px solid ${BORDER}`, color:MUTED, fontSize:13, cursor:"pointer", padding:"0 12px", height:44, borderRadius:8, fontFamily:F_MONO }}>✏️ Edit</button>
+              <button onClick={()=>setEditing(true)} title="Edit" style={{ background:"none", border:`1px solid ${BORDER}`, color:MUTED, fontSize:13, cursor:"pointer", padding:"0 12px", height:44, borderRadius:8, fontFamily:F_MONO }}>Edit</button>
             )}
             <button onClick={onClose} style={{ background:"none", border:"none", color:MUTED, fontSize:22, cursor:"pointer", padding:"12px", lineHeight:1, minWidth:48, minHeight:48, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:8 }}>✕</button>
           </div>
@@ -769,8 +787,8 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
             <EditRow label="Title" value={ef.title} onChange={v=>setEf(p=>({...p,title:v}))}/>
             <div style={{ display:"grid", gridTemplateColumns:m?"1fr 1fr":"repeat(4, 1fr)", gap:10 }}>
               <EditRow label="Date (YYYY-MM-DD)" value={ef.date} onChange={v=>setEf(p=>({...p,date:v}))}/>
-              <EditRow label="Owner" value={ef.assignee} onChange={v=>setEf(p=>({...p,assignee:v}))}/>
-              <EditRow label="Pillar" value={ef.pillar} onChange={v=>setEf(p=>({...p,pillar:v}))}/>
+              <EditSelect label="Owner" value={ef.assignee} onChange={v=>setEf(p=>({...p,assignee:v}))} options={OWNERS}/>
+              <EditSelect label="Pillar" value={ef.pillar} onChange={v=>setEf(p=>({...p,pillar:v}))} options={PILLARS}/>
               <EditRow label="Est. length" value={ef.est_length} onChange={v=>setEf(p=>({...p,est_length:v}))}/>
             </div>
             <EditRow label="Hook — first 2 seconds" value={ef.hook} onChange={v=>setEf(p=>({...p,hook:v}))} area/>
@@ -836,6 +854,21 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
                 <div style={{ fontSize:14, color:TEXT, fontStyle:"italic" }}>"{reel.caption}"</div>
               </div>
             )}
+
+            {/* Hashtag suggestions — tap to copy the whole set */}
+            <div style={{ marginBottom:16 }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:7 }}>
+                <div style={{ ...LBL, fontSize:10 }}>Hashtag suggestions</div>
+                <button onClick={()=>{ navigator.clipboard.writeText(hashtagsFor(reel).join(" ")); window.alert("Hashtags copied"); }}
+                  style={{ padding:"4px 10px", borderRadius:8, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:11.5, fontWeight:600, cursor:"pointer" }}>Copy all</button>
+              </div>
+              <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
+                {hashtagsFor(reel).map(h => (
+                  <span key={h} onClick={()=>navigator.clipboard.writeText(h)}
+                    style={{ padding:"3px 9px", borderRadius:99, border:`1px solid ${BORDER}`, background:CARD, color:MUTED, fontSize:11.5, cursor:"pointer" }}>{h}</span>
+                ))}
+              </div>
+            </div>
           </>
         )}
 
@@ -1882,13 +1915,12 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
   };
 
   const TABS = [
-    ["overview",  "🏠", "Overview",  "Home"],
+    ["overview",  "🏠", "Overview",     "Home"],
     ["plan",      "🎬", "Content plan", "Plan"],
-    ["calendar",  "🗓", "Calendar",  "Cal"],
-    ["stories",   "📸", "Stories",   "Stories"],
-    ["series",    "🎞", "Series",    "Series"],
-    ["analytics", "📊", "Analytics", "Stats"],
-    ["briefing",  "📖", "Briefing",  "Brief"],
+    ["calendar",  "🗓", "Calendar",     "Cal"],
+    ["series",    "🎞", "Series",       "Series"],
+    ["analytics", "📊", "Analytics",    "Stats"],
+    ["briefing",  "📖", "Briefing",     "Brief"],
   ];
 
   return (
@@ -2077,7 +2109,6 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
             {TABS.map(([id,,label])=>(
               <button key={id} onClick={()=>setTab(id)} style={{ padding:"8px 15px", borderRadius:8, border:`1px solid ${tab===id?TEXT:BORDER}`, cursor:"pointer", fontSize:12.5, fontFamily:F_BODY, fontWeight:600, background:tab===id?TEXT:"transparent", color:tab===id?BG:MUTED, transition:"all 0.15s" }}>{label}</button>
             ))}
-            <button onClick={()=>setShowBulk(true)} style={{ padding:"7px 14px", borderRadius:6, border:`1px solid ${BUILD}`, background:`${BUILD}11`, color:BUILD, fontSize:11, fontFamily:F_MONO, cursor:"pointer", marginLeft:8 }}>⬆ BULK</button>
           </div>
         ):(
           <div style={{ display:"flex", gap:6 }}>
@@ -2094,12 +2125,12 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
           <>
             {/* HEUTE */}
             {tab==="overview" && (
-              <Overview reels={brandReels} stories={brand === "all" ? stories : stories.filter(s => s.brand === brand)} m={m}
+              <Overview reels={brandReels} brand={brand} m={m}
                 onOpenReel={(reel,brand)=>setDetailReel({reel,brand})}/>
             )}
 
             {tab==="analytics" && (
-              <AnalyticsPage reels={brandReels} anMap={anMap} loading={anLoading} m={m}
+              <AnalyticsPage reels={brandReels} anMap={anMap} loading={anLoading} role={role} m={m}
                 onOpenReel={(reel,brand)=>setDetailReel({reel,brand})}/>
             )}
 
@@ -2133,8 +2164,7 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
 
             {/* REELS */}
             {tab==="plan" && (
-              <ContentPlan reels={reels} brand={brand} role={role} m={m} saving={saving}
-                onSetStatus={handleSetStatus}
+              <ContentPlan reels={reels} brand={brand} m={m}
                 onOpenReel={(reel,b)=>setDetailReel({reel,brand:b})}
                 onAdd={()=>{ setNewReel(p=>({...p, brand:wBrand})); setShowAddReel(true); }}/>
             )}

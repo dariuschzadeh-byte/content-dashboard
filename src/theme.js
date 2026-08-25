@@ -44,7 +44,7 @@ export const brandSoft = (b) => (b === "franz" ? FRANZ_SOFT : TGC_SOFT);
 export const brandName = (b) => (b === "franz" ? "fr-anz" : b === "tgc" ? "TGC" : "all brands");
 
 // ── Creators / assignees ──────────────────────────────────────
-export const ASSIGNEE_COLORS = { ando: "#A8642F", yugo: "#41618C" };
+export const ASSIGNEE_COLORS = { ando: "#8A6A4B", yugo: "#5A6B7D" };
 export const aColor = (name) => ASSIGNEE_COLORS[(name || "").trim().toLowerCase()] || MUTED;
 
 // ── Status ────────────────────────────────────────────────────
@@ -61,12 +61,12 @@ export const formatDate = (s) => s ? new Date(s + "T00:00:00").toLocaleDateStrin
 export const SOCIALS = { instagram: "", tiktok: "" };
 
 // ── Atoms (mirror the Society dashboard's Card / Pill / BrandDot) ──
-export function Chip({ text, color = MUTED, filled = false, size = 12 }) {
+export function Chip({ text, color = MUTED, filled = false, size = 11.5 }) {
   return (
     <span style={{
-      display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 99,
+      display: "inline-flex", alignItems: "center", padding: "2px 9px", borderRadius: 99,
       background: filled ? color : "transparent",
-      border: `1px solid ${filled ? color : color + "55"}`,
+      border: `1px solid ${filled ? color : color + "3D"}`,
       color: filled ? "#fff" : color,
       fontSize: size, fontWeight: 600, fontFamily: F_BODY, lineHeight: 1.45, whiteSpace: "nowrap",
     }}>{text}</span>
@@ -81,7 +81,7 @@ export function Stat({ label, value, sub, color = TEXT, m }) {
   return (
     <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, padding: m ? "14px 16px" : 20, minWidth: 0 }}>
       <div style={{ ...LBL, marginBottom: 8 }}>{label}</div>
-      <div style={{ fontSize: m ? 24 : 30, fontWeight: 700, color, lineHeight: 1, fontFamily: F_BODY }}>{value}</div>
+      <div style={{ fontSize: m ? 22 : 26, fontWeight: 700, color, lineHeight: 1, fontFamily: F_BODY }}>{value}</div>
       {sub && <div style={{ fontSize: 12, color: MUTED, marginTop: 6 }}>{sub}</div>}
     </div>
   );
@@ -93,3 +93,30 @@ export const fmtNum = (n) => {
   if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, "") + "K";
   return String(n);
 };
+
+// ── Hashtag suggestions ───────────────────────────────────────
+// Base set for fr-anz (cinnamon rolls, specialty coffee & matcha in
+// Pererenan, Bali) plus pillar-specific additions. Copyable in the reel view.
+const HT_BASE = ["#franz", "#cinnamonroll", "#pererenan", "#canggu", "#bali", "#balicafe", "#balifood"];
+const HT_PILLAR = {
+  process:      ["#behindthescenes", "#baking", "#asmr", "#howitsmade"],
+  bts:          ["#behindthescenes", "#dayinthelife", "#smallbusiness"],
+  usp:          ["#specialtycoffee", "#matcha", "#matchalatte", "#coffeelover"],
+  photobooth:   ["#photobooth", "#photostrip", "#balithingstodo"],
+  storytelling: ["#buildinpublic", "#smallbusinessstory", "#foundersjourney"],
+  episode:      ["#buildinpublic", "#openingacafe", "#entrepreneur"],
+  filler:       ["#trending", "#foryou", "#baliviral"],
+};
+const HT_TGC = ["#thegreencollective", "#healthyfood", "#grabandgo", "#balihealthy", "#cleaneating"];
+
+export function hashtagsFor(reel) {
+  const brandTags = reel?.brand === "tgc" ? HT_TGC : HT_BASE;
+  const pillar = (reel?.pillar || "").trim().toLowerCase();
+  const extra = HT_PILLAR[pillar] || [];
+  const text = `${reel?.title || ""} ${reel?.description || ""} ${reel?.format || ""}`.toLowerCase();
+  const topical = [];
+  if (/matcha/.test(text)) topical.push("#matcha", "#matchalatte");
+  if (/coffee|espresso|latte|brew/.test(text)) topical.push("#specialtycoffee", "#coffeetime");
+  if (/roll|dough|bake|cinnamon/.test(text)) topical.push("#cinnamonrolls", "#freshlybaked");
+  return [...new Set([...brandTags, ...extra, ...topical])].slice(0, 14);
+}
