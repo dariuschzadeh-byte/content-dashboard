@@ -146,18 +146,22 @@ export async function addReel(reel) {
   const { data, error } = await supabase
     .from("reels")
     .insert([{
-      brand:       reel.brand,
-      date:        reel.date,
-      type:        reel.type,
-      title:       reel.title,
-      caption:     reel.caption     || null,
-      hook:        reel.hook        || null,
-      description: reel.description || null,
-      format:      reel.format      || null,
-      notes:       reel.notes       || null,
-      series_id:   reel.series      || null,
-      part:        reel.part        ? parseInt(reel.part) : null,
-      status:      "planned",
+      brand:          reel.brand,
+      date:           reel.date,
+      type:           reel.type,
+      title:          reel.title,
+      caption:        reel.caption        || null,
+      hook:           reel.hook           || null,
+      description:    reel.description    || null,
+      format:         reel.format         || null,
+      notes:          reel.notes          || null,
+      series_id:      reel.series         || null,
+      part:           reel.part           ? parseInt(reel.part) : null,
+      assignee:       reel.assignee       || null,
+      pillar:         reel.pillar         || null,
+      est_length:     reel.est_length     || null,
+      reference_link: reel.reference_link || null,
+      status:         "planned",
     }])
     .select()
     .single();
@@ -203,7 +207,8 @@ export async function updateReelPostedAt(id, postedAt) {
 // General reel edit (title, caption, hook, description, format, notes, date, …).
 // Every logged-in user may edit (RLS: "auth update reels").
 export async function updateReel(id, fields) {
-  const allowed = ["title", "caption", "hook", "description", "format", "notes", "date", "type", "series_id", "part"];
+  const allowed = ["title", "caption", "hook", "description", "format", "notes", "date", "type", "series_id", "part",
+                   "assignee", "pillar", "est_length", "reference_link", "approved"];
   const patch = {};
   for (const k of allowed) {
     if (k in fields) patch[k] = (fields[k] === "" && k !== "title") ? null : fields[k];
@@ -240,11 +245,19 @@ export async function addStory(story) {
   const { data, error } = await supabase
     .from("stories")
     .insert([{
-      brand:   story.brand,
-      date:    story.date,
-      morning: story.morning || "—",
-      midday:  story.midday  || "—",
-      evening: story.evening || "—",
+      brand: story.brand,
+      date:  story.date,
+      // Six slots are what the UI collects; the legacy 3 stay in sync for
+      // older rows/imports that still speak morning/midday/evening.
+      slot1: story.slot1 || story.morning || null,
+      slot2: story.slot2 || story.midday  || null,
+      slot3: story.slot3 || story.evening || null,
+      slot4: story.slot4 || null,
+      slot5: story.slot5 || null,
+      slot6: story.slot6 || null,
+      morning: story.slot1 || story.morning || "—",
+      midday:  story.slot2 || story.midday  || "—",
+      evening: story.slot3 || story.evening || "—",
     }])
     .select()
     .single();
@@ -294,37 +307,32 @@ export async function saveAnalytics(reelId, vals) {
     .eq("reel_id", reelId)
     .single();
 
+  const metrics = {
+    views:    parseInt(vals.views)    || 0,
+    likes:    parseInt(vals.likes)    || 0,
+    comments: parseInt(vals.comments) || 0,
+    shares:   parseInt(vals.shares)   || 0,
+    saves:    parseInt(vals.saves)    || 0,
+  };
   if (existing) {
-    // Update
     const { data, error } = await supabase
-      .from("analytics")
-      .update({
-        views:  parseInt(vals.views)  || 0,
-        likes:  parseInt(vals.likes)  || 0,
-        shares: parseInt(vals.shares) || 0,
-        saves:  parseInt(vals.saves)  || 0,
-      })
-      .eq("reel_id", reelId)
-      .select()
-      .single();
+      .from("analytics").update(metrics).eq("reel_id", reelId).select().single();
     if (error) throw error;
     return data;
   } else {
-    // Insert
     const { data, error } = await supabase
-      .from("analytics")
-      .insert([{
-        reel_id: reelId,
-        views:   parseInt(vals.views)  || 0,
-        likes:   parseInt(vals.likes)  || 0,
-        shares:  parseInt(vals.shares) || 0,
-        saves:   parseInt(vals.saves)  || 0,
-      }])
-      .select()
-      .single();
+      .from("analytics").insert([{ reel_id: reelId, ...metrics }]).select().single();
     if (error) throw error;
     return data;
   }
+}
+
+// All analytics rows at once — for the Analytics page (joined client-side
+// with the reels already in memory; the table is small).
+export async function fetchAllAnalytics() {
+  const { data, error } = await supabase.from("analytics").select("*");
+  if (error) throw error;
+  return data || [];
 }
 
 
@@ -333,18 +341,23 @@ export async function saveAnalytics(reelId, vals) {
 export async function bulkImportReels(reelsArray) {
   // reelsArray = Array von Reel-Objekten aus dem CSV/Sheet
   const rows = reelsArray.map(r => ({
-    brand:       r.brand?.toLowerCase(),
-    date:        r.date,
-    type:        r.type        || "REEL",
-    title:       r.title,
-    caption:     r.caption     || null,
-    hook:        r.hook        || null,
-    description: r.description || null,
-    format:      r.format      || null,
-    notes:       r.notes       || null,
-    series_id:   r.series      || null,
-    part:        r.part        ? parseInt(r.part) : null,
-    status:      "planned",
+    brand:          r.brand?.toLowerCase() || "franz",
+    date:           r.date,
+    type:           r.type           || "REEL",
+    title:          r.title,
+    caption:        r.caption        || null,
+    hook:           r.hook           || null,
+    description:    r.description    || null,
+    format:         r.format         || null,
+    notes:          r.notes          || null,
+    series_id:      r.series         || null,
+    part:           r.part           ? parseInt(r.part) : null,
+    assignee:       r.assignee       || null,
+    pillar:         r.pillar         || null,
+    est_length:     r.est_length     || null,
+    reference_link: r.reference_link || null,
+    approved:       !!r.approved,
+    status:         "planned",
   }));
 
   const { data, error } = await supabase
@@ -357,11 +370,14 @@ export async function bulkImportReels(reelsArray) {
 
 export async function bulkImportStories(storiesArray) {
   const rows = storiesArray.map(s => ({
-    brand:   s.brand?.toLowerCase(),
+    brand:   s.brand?.toLowerCase() || "franz",
     date:    s.date,
-    morning: s.morning || "—",
-    midday:  s.midday  || "—",
-    evening: s.evening || "—",
+    slot1:   s.slot1 || s.morning || null,
+    slot2:   s.slot2 || s.midday  || null,
+    slot3:   s.slot3 || s.evening || null,
+    morning: s.slot1 || s.morning || "—",
+    midday:  s.slot2 || s.midday  || "—",
+    evening: s.slot3 || s.evening || "—",
   }));
 
   const { data, error } = await supabase

@@ -15,15 +15,18 @@ import {
   updateReelStatus, updateStorySlot, updateStorySlotStatus,
   saveAnalytics, bulkImportReels, bulkImportStories,
   updateReelDriveLink, updateReelPostedAt,
-  fetchAnalyticsForReel, fetchProfiles,
+  fetchAnalyticsForReel, fetchProfiles, fetchAllAnalytics,
   signOut, getSession, onAuthChange, getMyProfile,
   updateReel, changePassword,
 } from "./supabaseClient";
 import Auth from "./Auth";
-
-// ── Colors ────────────────────────────────────────────────────
-const FRANZ  = "#C4527A";
-const TGC    = "#2D7D46";
+import Overview from "./Overview";
+import AnalyticsPage from "./AnalyticsPage";
+import {
+  FRANZ, TGC, BUILD, BG, CARD, BORDER, TEXT, MUTED, SOFT, GREEN, AMBER, RED,
+  F_BODY, F_DISPLAY, F_MONO, LBL, Chip, aColor, bc, formatDate, MONTH_NAMES,
+  STATUS_FLOW, STATUS_LABEL, STATUS_COLOR, STATUS_BG,
+} from "./theme";
 
 // ── Drive Folder Links ────────────────────────────────────────
 // Direkter Link zum Brand-Monats-Ordner. Videograf lädt Datei dort hoch.
@@ -36,16 +39,6 @@ const DRIVE_RAW_FOLDERS = {
   franz: "https://drive.google.com/drive/folders/1MdL1VyEhRXG8izigEM3ehuRVkfplNSlb",
   tgc:   "https://drive.google.com/drive/folders/1S7uF2wx6Fehwws4BuwGVTLb91SD4h-KL",
 };
-const BUILD  = "#4A6FA5";
-const BG     = "#F5F0E8";
-const CARD   = "#FFFFFF";
-const BORDER = "#E0D8CC";
-const TEXT   = "#1A1A1A";
-const MUTED  = "#888880";
-const SOFT   = "#EDE8DF";
-const GREEN  = "#2D7D46";
-const AMBER  = "#D97706";
-const RED    = "#DC2626";
 
 function getDaysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
 function getStartDay(y, m)    { return new Date(y, m, 1).getDay(); }
@@ -96,18 +89,108 @@ function useSwipeBack(onClose) {
   }, [onClose]);
 }
 
-const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-const formatDate  = (s) => s ? new Date(s + "T00:00:00").toLocaleDateString("en-GB", { day:"numeric", month:"short" }) : "—";
-const bc  = (b) => b === "franz" ? FRANZ : TGC;
 const uid = () => Math.random().toString(36).slice(2, 8);
 
 // ── Status helpers ────────────────────────────────────────────
-const STATUS_FLOW   = ["planned", "filmed", "posted"];
-const STATUS_LABEL  = { planned:"Planned", filmed:"Filmed", posted:"Posted" };
-const STATUS_COLOR  = { planned:MUTED, filmed:AMBER, posted:GREEN };
-const STATUS_BG     = { planned:"transparent", filmed:"#FEF3C7", posted:"#F0F7F3" };
 const nextStatus    = (s) => { const i = STATUS_FLOW.indexOf(s); return i < 2 ? STATUS_FLOW[i+1] : STATUS_FLOW[i]; };
 const prevStatus    = (s) => { const i = STATUS_FLOW.indexOf(s); return i > 0 ? STATUS_FLOW[i-1] : STATUS_FLOW[i]; };
+
+
+// ── Bulk import: real CSV parser + header mapping ─────────────
+// Handles quoted fields (commas/quotes/newlines inside cells) and maps both
+// the app template AND the monthly Google-Sheet export (Date/Owner/Pillar/
+// Format/Working Title/Concept/Hook/Link/Note/Approved by) onto reel fields.
+function parseCSV(text) {
+  const rows = []; let row = [], field = "", inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i+1] === '"') { field += '"'; i++; } else inQ = false; }
+      else field += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ',') { row.push(field); field = ""; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i+1] === '\n') i++;
+      row.push(field); field = "";
+      if (row.some(v => v.trim() !== "")) rows.push(row);
+      row = [];
+    } else field += c;
+  }
+  row.push(field);
+  if (row.some(v => v.trim() !== "")) rows.push(row);
+  return rows;
+}
+
+const normDate = (raw) => {
+  const v = (raw || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  const md = v.match(/^(\d{1,2})[./](\d{1,2})[./](\d{2,4})$/); // 26.08.26 / 26.08.2026
+  if (md) {
+    const yy = md[3].length === 2 ? "20" + md[3] : md[3];
+    return `${yy}-${md[2].padStart(2, "0")}-${md[1].padStart(2, "0")}`;
+  }
+  return null;
+};
+
+function normalizeBulkRows(text, defaultBrand = "franz") {
+  const raw = parseCSV(text);
+  if (raw.length < 2) return { reels: [], stories: [], errors: ["No data rows found."] };
+  const keyOf = (h) => (h || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const headers = raw[0].map(keyOf);
+  const FIELD = (k) => {
+    if (k === "date") return "date";
+    if (k === "owner" || k === "assignee") return "assignee";
+    if (k === "pillar") return "pillar";
+    if (k === "format") return "format";
+    if (k === "workingtitle" || k === "title") return "title";
+    if (k === "concept" || k === "description" || k === "whattofilm") return "description";
+    if (k.startsWith("hook")) return "hook";
+    if (k === "link" || k === "referencelink" || k === "reference") return "reference_link";
+    if (k === "caption") return "caption";
+    if (k === "note" || k === "notes" || k === "directorsnote") return "notes";
+    if (k === "approvedby" || k === "approved") return "approvedRaw";
+    if (k.includes("length")) return "est_length";
+    if (["type","brand","series","part","morning","midday","evening"].includes(k)) return k;
+    return null;
+  };
+  const reelsOut = [], storiesOut = [], errors = [];
+  raw.slice(1).forEach((cells, idx) => {
+    const o = {};
+    headers.forEach((h, i) => { const f = FIELD(h); if (f && cells[i] != null && cells[i].trim() !== "") o[f] = cells[i].trim(); });
+    const line = idx + 2;
+    const date = normDate(o.date);
+    if (!date) { errors.push(`Row ${line}: missing/invalid date ("${o.date || ""}").`); return; }
+    const isStory = (o.type || "").toUpperCase() === "STORY" || (!o.title && (o.morning || o.midday || o.evening));
+    if (isStory) {
+      storiesOut.push({ brand: o.brand || defaultBrand, date, morning: o.morning || "", midday: o.midday || "", evening: o.evening || "" });
+      return;
+    }
+    if (!o.title) { errors.push(`Row ${line}: missing title.`); return; }
+    const apr = (o.approvedRaw || "").toLowerCase();
+    reelsOut.push({
+      brand: o.brand || defaultBrand, date,
+      type: (o.type || "").toUpperCase() === "SERIES" || o.series ? "SERIES" : "REEL",
+      title: o.title, hook: o.hook, description: o.description, format: o.format,
+      caption: o.caption, notes: o.notes, series: o.series, part: o.part,
+      assignee: o.assignee, pillar: o.pillar, est_length: o.est_length,
+      reference_link: o.reference_link,
+      approved: !!apr && !["no","false","0"].includes(apr),
+    });
+  });
+  return { reels: reelsOut, stories: storiesOut, errors };
+}
+
+// Story slots: the UI collects six; older rows only have the legacy three.
+const ALL_SLOT_KEYS    = ["slot1","slot2","slot3","slot4","slot5","slot6"];
+const LEGACY_SLOT_KEYS = ["morning","midday","evening"];
+const countPostedSlots = (s) => Math.max(
+  ALL_SLOT_KEYS.filter(k => s[`${k}_status`] === "posted").length,
+  LEGACY_SLOT_KEYS.filter(k => s[`${k}_status`] === "posted").length,
+);
+const countFilledSlots = (s) => Math.max(1, Math.max(
+  ALL_SLOT_KEYS.filter(k => s[k] && s[k] !== "—").length,
+  LEGACY_SLOT_KEYS.filter(k => s[k] && s[k] !== "—").length,
+));
 
 // Days until date
 const daysUntil = (dateStr) => {
@@ -136,15 +219,15 @@ const deadlineLabel = (days) => {
 
 const Input = ({ value, onChange, placeholder, style = {} }) => (
   <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-    style={{ padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:6, color:TEXT, fontSize:14, fontFamily:"monospace", outline:"none", width:"100%", boxSizing:"border-box", minHeight:44, ...style }}/>
+    style={{ padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:6, color:TEXT, fontSize:14, fontFamily:F_MONO, outline:"none", width:"100%", boxSizing:"border-box", minHeight:44, ...style }}/>
 );
 
 const Btn = ({ onClick, children, accent, fill, disabled, style = {} }) => (
-  <button onClick={onClick} disabled={disabled} style={{ padding:"10px 16px", borderRadius:6, border:`1px solid ${disabled?BORDER:accent||"#999"}`, background:fill?(accent||"#333"):"transparent", color:disabled?MUTED:fill?"#fff":accent||MUTED, fontSize:12, fontFamily:"monospace", cursor:disabled?"default":"pointer", letterSpacing:"1px", transition:"all 0.15s", opacity:disabled?0.5:1, minHeight:44, ...style }}>{children}</button>
+  <button onClick={onClick} disabled={disabled} style={{ padding:"10px 16px", borderRadius:6, border:`1px solid ${disabled?BORDER:accent||"#999"}`, background:fill?(accent||"#333"):"transparent", color:disabled?MUTED:fill?"#fff":accent||MUTED, fontSize:12, fontFamily:F_MONO, cursor:disabled?"default":"pointer", letterSpacing:"1px", transition:"all 0.15s", opacity:disabled?0.5:1, minHeight:44, ...style }}>{children}</button>
 );
 
 const BrandToggle = ({ brand, active, onClick, compact }) => (
-  <button onClick={onClick} style={{ padding:compact?"8px 14px":"9px 22px", borderRadius:8, border:`1px solid ${active?bc(brand):BORDER}`, background:active?bc(brand):"transparent", color:active?"#fff":MUTED, fontSize:compact?11:12, fontFamily:"monospace", letterSpacing:"1px", cursor:"pointer", transition:"all 0.15s", flex:1, minHeight:44 }}>
+  <button onClick={onClick} style={{ padding:compact?"8px 14px":"9px 22px", borderRadius:8, border:`1px solid ${active?bc(brand):BORDER}`, background:active?bc(brand):"transparent", color:active?"#fff":MUTED, fontSize:compact?11:12, fontFamily:F_MONO, letterSpacing:"1px", cursor:"pointer", transition:"all 0.15s", flex:1, minHeight:44 }}>
     {brand === "franz" ? "FRANZ" : compact ? "TGC" : "THE GREEN COLLECTIVE"}
   </button>
 );
@@ -158,7 +241,7 @@ const Spinner = ({ color = FRANZ }) => (
 
 const ErrorBanner = ({ msg, onDismiss }) => (
   <div style={{ background:"#FFF0F0", border:"1px solid #FFCCCC", borderRadius:8, padding:"12px 16px", marginBottom:14, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-    <span style={{ fontSize:13, color:"#CC3333", fontFamily:"monospace" }}>⚠️  {msg}</span>
+    <span style={{ fontSize:13, color:"#CC3333", fontFamily:F_MONO }}>⚠️  {msg}</span>
     <button onClick={onDismiss} style={{ background:"none", border:"none", color:MUTED, cursor:"pointer", fontSize:16 }}>✕</button>
   </div>
 );
@@ -169,7 +252,7 @@ function StatusBadge({ status, onClick, disabled }) {
   const bg    = STATUS_BG[status]    || "transparent";
   const label = STATUS_LABEL[status] || status;
   return (
-    <button onClick={onClick} disabled={disabled} style={{ padding:"4px 10px", borderRadius:20, border:`1.5px solid ${color}`, background:bg, color, fontSize:10, fontFamily:"monospace", fontWeight:700, cursor:disabled?"default":"pointer", letterSpacing:"0.5px", transition:"all 0.15s", whiteSpace:"nowrap" }}>
+    <button onClick={onClick} disabled={disabled} style={{ padding:"4px 10px", borderRadius:20, border:`1.5px solid ${color}`, background:bg, color, fontSize:10, fontFamily:F_MONO, fontWeight:700, cursor:disabled?"default":"pointer", letterSpacing:"0.5px", transition:"all 0.15s", whiteSpace:"nowrap" }}>
       {status === "planned" && "○ "}
       {status === "filmed"  && "◑ "}
       {status === "posted"  && "● "}
@@ -201,24 +284,24 @@ function DatePicker({ value, onChange, accentColor }) {
 
   return (
     <div ref={ref} style={{ position:"relative" }}>
-      <div onClick={() => setOpen(o=>!o)} style={{ padding:"10px 12px", background:SOFT, border:`1px solid ${open?accent:BORDER}`, borderRadius:6, color:value?TEXT:MUTED, fontSize:14, fontFamily:"monospace", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"space-between", minHeight:44 }}>
+      <div onClick={() => setOpen(o=>!o)} style={{ padding:"10px 12px", background:SOFT, border:`1px solid ${open?accent:BORDER}`, borderRadius:6, color:value?TEXT:MUTED, fontSize:14, fontFamily:F_MONO, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"space-between", minHeight:44 }}>
         <span>{value ? formatDate(value) : "Pick a date"}</span><span>📅</span>
       </div>
       {open && (
         <div style={{ position:"absolute", top:"calc(100% + 6px)", left:0, zIndex:2000, background:CARD, border:`1px solid ${BORDER}`, borderRadius:12, padding:14, boxShadow:"0 8px 32px rgba(0,0,0,0.18)", minWidth:260, width:"100%" }}>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
             <button onClick={pm} style={{ background:"none", border:`1px solid ${BORDER}`, borderRadius:6, width:32, height:32, cursor:"pointer", color:MUTED, fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>‹</button>
-            <span style={{ fontSize:13, fontWeight:700, color:TEXT, fontFamily:"monospace" }}>{MONTH_NAMES[vM].slice(0,3)} {vY}</span>
+            <span style={{ fontSize:13, fontWeight:700, color:TEXT, fontFamily:F_MONO }}>{MONTH_NAMES[vM].slice(0,3)} {vY}</span>
             <button onClick={nm} style={{ background:"none", border:`1px solid ${BORDER}`, borderRadius:6, width:32, height:32, cursor:"pointer", color:MUTED, fontSize:16, display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2, marginBottom:4 }}>
-            {["Su","Mo","Tu","We","Th","Fr","Sa"].map(d => <div key={d} style={{ textAlign:"center", fontSize:9, color:MUTED, fontFamily:"monospace", padding:"2px 0" }}>{d}</div>)}
+            {["Su","Mo","Tu","We","Th","Fr","Sa"].map(d => <div key={d} style={{ textAlign:"center", fontSize:9, color:MUTED, fontFamily:F_MONO, padding:"2px 0" }}>{d}</div>)}
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
             {Array.from({length:sd}).map((_,i) => <div key={`e${i}`}/>)}
             {Array.from({length:days}).map((_,i) => {
               const d=i+1, s=d===sel;
-              return <div key={d} onClick={() => pick(d)} style={{ textAlign:"center", padding:"6px 2px", borderRadius:6, cursor:"pointer", fontSize:12, fontFamily:"monospace", fontWeight:s?700:400, background:s?accent:"transparent", color:s?"#fff":TEXT, transition:"all 0.1s" }} onMouseEnter={e=>!s&&(e.currentTarget.style.background=`${accent}22`)} onMouseLeave={e=>!s&&(e.currentTarget.style.background="transparent")}>{d}</div>;
+              return <div key={d} onClick={() => pick(d)} style={{ textAlign:"center", padding:"6px 2px", borderRadius:6, cursor:"pointer", fontSize:12, fontFamily:F_MONO, fontWeight:s?700:400, background:s?accent:"transparent", color:s?"#fff":TEXT, transition:"all 0.1s" }} onMouseEnter={e=>!s&&(e.currentTarget.style.background=`${accent}22`)} onMouseLeave={e=>!s&&(e.currentTarget.style.background="transparent")}>{d}</div>;
             })}
           </div>
         </div>
@@ -307,14 +390,14 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, onEditSt
           }}>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
             <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontSize:9, color, fontFamily:"monospace", letterSpacing:"2px", fontWeight:700, marginBottom:3 }}>
+              <div style={{ fontSize:9, color, fontFamily:F_MONO, letterSpacing:"2px", fontWeight:700, marginBottom:3 }}>
                 {brand.toUpperCase()} {type.toUpperCase()}
               </div>
               <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                 <div style={{ fontSize:m?20:24, fontWeight:700, color:isComplete ? color : TEXT, lineHeight:1 }}>
                   {posted}<span style={{ fontSize:m?13:15, color:MUTED, fontWeight:400 }}>/{total}</span>
                 </div>
-                <div style={{ fontSize:11, color:MUTED, fontFamily:"monospace" }}>{type === "reel" ? "reel" : "stories"} posted</div>
+                <div style={{ fontSize:11, color:MUTED, fontFamily:F_MONO }}>{type === "reel" ? "reel" : "stories"} posted</div>
               </div>
             </div>
             {!hasNothing && (
@@ -342,7 +425,7 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, onEditSt
           <div key={reel.id} onClick={() => onOpenReel(reel, reel.brand)}
             style={{ background:CARD, border:`1px solid ${BORDER}`, borderLeft:`4px solid ${color}`, borderRadius:12, padding:m?14:18, marginBottom:8, cursor:"pointer", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
             <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, flexWrap:"wrap" }}>
-              {sObj && <div style={{ padding:"3px 10px", borderRadius:4, background:`${sObj.color}11`, border:`1px solid ${sObj.color}33`, fontSize:10, fontFamily:"monospace", color:sObj.color }}>{sObj.name} · Pt {reel.part}</div>}
+              {sObj && <div style={{ padding:"3px 10px", borderRadius:4, background:`${sObj.color}11`, border:`1px solid ${sObj.color}33`, fontSize:10, fontFamily:F_MONO, color:sObj.color }}>{sObj.name} · Pt {reel.part}</div>}
               <div onClick={e => e.stopPropagation()}>
                 <StatusBadge status={reel.status} onClick={() => onToggleStatus(reel.id, reel.status)} disabled={saving}/>
               </div>
@@ -350,12 +433,12 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, onEditSt
             <div style={{ fontSize:m?16:18, fontWeight:700, color:TEXT, marginBottom:6 }}>{reel.title}</div>
             {reel.hook && (
               <div style={{ padding:"10px 14px", background:`${color}08`, border:`1px solid ${color}22`, borderRadius:8, marginBottom:8 }}>
-                <div style={{ fontSize:9, color, fontFamily:"monospace", letterSpacing:"1.5px", marginBottom:3 }}>HOOK — FIRST 2 SECONDS</div>
+                <div style={{ fontSize:9, color, fontFamily:F_MONO, letterSpacing:"1.5px", marginBottom:3 }}>HOOK — FIRST 2 SECONDS</div>
                 <div style={{ fontSize:14, color:TEXT, fontStyle:"italic" }}>"{reel.hook}"</div>
               </div>
             )}
             {reel.caption && <div style={{ fontSize:12, color:MUTED, fontStyle:"italic", marginBottom:8 }}>Caption: "{reel.caption}"</div>}
-            <div style={{ fontSize:9, color:MUTED, fontFamily:"monospace", letterSpacing:"1px" }}>TAP CARD FOR FULL DETAILS →</div>
+            <div style={{ fontSize:9, color:MUTED, fontFamily:F_MONO, letterSpacing:"1px" }}>TAP CARD FOR FULL DETAILS →</div>
           </div>
         );
       });
@@ -382,14 +465,14 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, onEditSt
                     onClick={() => onEditStorySlot && onEditStorySlot(story.id, slot.key, slot.value)}
                     style={{ background:done?`${color}0F`:SOFT, border:`1px solid ${done?color+"55":BORDER}`, borderRadius:8, padding:"10px 8px", cursor:"pointer", minHeight:90 }}>
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
-                      <span style={{ fontSize:8, color:done?color:MUTED, fontFamily:"monospace", fontWeight:700 }}>{slot.label.toUpperCase()}</span>
+                      <span style={{ fontSize:8, color:done?color:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{slot.label.toUpperCase()}</span>
                       <div onClick={e => { e.stopPropagation(); onToggleStorySlot && onToggleStorySlot(story.id, slot.key, slot.status); }}
                         style={{ width:20, height:20, borderRadius:"50%", background:done?color:"transparent", border:`1.5px solid ${done?color:BORDER}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, color:"#fff", cursor:"pointer", flexShrink:0 }}>
                         {done?"✓":""}
                       </div>
                     </div>
                     <div style={{ fontSize:10, color:TEXT, lineHeight:1.4 }}>{slot.value || "—"}</div>
-                    <div style={{ marginTop:5, fontSize:8, color:done?color:MUTED, fontFamily:"monospace" }}>{done?"✓ posted":"tap to edit"}</div>
+                    <div style={{ marginTop:5, fontSize:8, color:done?color:MUTED, fontFamily:F_MONO }}>{done?"✓ posted":"tap to edit"}</div>
                   </div>
                 );
               })}
@@ -405,23 +488,23 @@ function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, onEditSt
     <div>
       {/* Header */}
       <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14, padding:m?14:20, marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-        <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:4 }}>TODAY</div>
+        <div style={{ fontSize:10, color:MUTED, fontFamily:F_MONO, letterSpacing:"2px", marginBottom:4 }}>TODAY</div>
         <div style={{ fontSize:m?20:26, fontWeight:700, color:TEXT }}>
           {new Date().toLocaleDateString("en-GB", { weekday:"long", day:"numeric", month:"long" })}
         </div>
         {totalToPost > 0 && (
-          <div style={{ marginTop:10, fontSize:13, color:MUTED, fontFamily:"monospace" }}>
+          <div style={{ marginTop:10, fontSize:13, color:MUTED, fontFamily:F_MONO }}>
             <span style={{ color:allDone?GREEN:TEXT, fontWeight:700 }}>{totalPosted}</span>/{totalToPost} done
           </div>
         )}
         {allDone && (
           <div style={{ marginTop:10, padding:"8px 14px", background:`${GREEN}11`, border:`1px solid ${GREEN}33`, borderRadius:8, display:"inline-flex", alignItems:"center", gap:8 }}>
             <span style={{ fontSize:16 }}>✅</span>
-            <span style={{ fontSize:12, color:GREEN, fontFamily:"monospace", fontWeight:700 }}>Everything posted today!</span>
+            <span style={{ fontSize:12, color:GREEN, fontFamily:F_MONO, fontWeight:700 }}>Everything posted today!</span>
           </div>
         )}
         {totalToPost === 0 && (
-          <div style={{ marginTop:10, fontSize:13, color:MUTED, fontFamily:"monospace" }}>No content planned for today.</div>
+          <div style={{ marginTop:10, fontSize:13, color:MUTED, fontFamily:F_MONO }}>No content planned for today.</div>
         )}
       </div>
 
@@ -458,7 +541,7 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving, role, on
       {isAdmin && (
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
           {!adding ? (
-            <button onClick={()=>setAdding(true)} style={{ alignSelf:"flex-start", padding:"8px 16px", borderRadius:8, border:`1px solid ${FRANZ}`, background:`${FRANZ}11`, color:FRANZ, fontSize:12, fontFamily:"monospace", fontWeight:700, cursor:"pointer" }}>+ SERIES</button>
+            <button onClick={()=>setAdding(true)} style={{ alignSelf:"flex-start", padding:"8px 16px", borderRadius:8, border:`1px solid ${FRANZ}`, background:`${FRANZ}11`, color:FRANZ, fontSize:12, fontFamily:F_MONO, fontWeight:700, cursor:"pointer" }}>+ SERIES</button>
           ) : (
             <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:12, padding:16, display:"flex", flexWrap:"wrap", gap:10, alignItems:"center" }}>
               <input placeholder="Name" value={ns.name} onChange={e=>setNs(p=>({...p,name:e.target.value}))} style={{ padding:"9px 12px", borderRadius:8, border:`1px solid ${BORDER}`, fontSize:13, flex:"1 1 160px" }}/>
@@ -500,14 +583,14 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving, role, on
             <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:14 }}>
               <div style={{ flex:1, minWidth:0 }}>
                 <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:3 }}>
-                  <div style={{ fontSize:9, color:s.color, fontFamily:"monospace", letterSpacing:"2px", fontWeight:700 }}>{s.brand.toUpperCase()}</div>
+                  <div style={{ fontSize:9, color:s.color, fontFamily:F_MONO, letterSpacing:"2px", fontWeight:700 }}>{s.brand.toUpperCase()}</div>
                   <span style={{ fontSize:14, color:s.color }}>{isExpanded ? "▼" : "▶"}</span>
                 </div>
                 <div style={{ fontSize:m?15:18, fontWeight:700, color:TEXT }}>{s.name}</div>
-                <div style={{ fontSize:11, color:MUTED, fontFamily:"monospace", marginTop:3 }}>
+                <div style={{ fontSize:11, color:MUTED, fontFamily:F_MONO, marginTop:3 }}>
                   {posted} posted · {filmed} filmed · {planned} planned · {s.parts} total
                 </div>
-                {!isExpanded && episodes.length > 0 && <div style={{ fontSize:9, color:s.color, fontFamily:"monospace", marginTop:6, letterSpacing:"1px" }}>TAP TO VIEW ALL {episodes.length} EPISODES →</div>}
+                {!isExpanded && episodes.length > 0 && <div style={{ fontSize:9, color:s.color, fontFamily:F_MONO, marginTop:6, letterSpacing:"1px" }}>TAP TO VIEW ALL {episodes.length} EPISODES →</div>}
               </div>
               {/* Ampel */}
               {nextEp && (
@@ -517,7 +600,7 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving, role, on
                       {ampel===GREEN?"✓":ampel===AMBER?"⚡":"🔴"}
                     </span>
                   </div>
-                  <div style={{ fontSize:9, color:ampel, fontFamily:"monospace", fontWeight:700, whiteSpace:"nowrap" }}>
+                  <div style={{ fontSize:9, color:ampel, fontFamily:F_MONO, fontWeight:700, whiteSpace:"nowrap" }}>
                     {deadlineLabel(nextDays)}
                   </div>
                 </div>
@@ -550,8 +633,8 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving, role, on
 
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
                       <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                        <span style={{ fontSize:9, color:s.color, fontFamily:"monospace", fontWeight:700 }}>TEIL {ep.part}</span>
-                        <span style={{ fontSize:9, color:bc(ep.b), fontFamily:"monospace" }}>{ep.b==="franz"?"Franz":"TGC"}</span>
+                        <span style={{ fontSize:9, color:s.color, fontFamily:F_MONO, fontWeight:700 }}>TEIL {ep.part}</span>
+                        <span style={{ fontSize:9, color:bc(ep.b), fontFamily:F_MONO }}>{ep.b==="franz"?"Franz":"TGC"}</span>
                       </div>
                       <StatusBadge status={ep.status} onClick={e => { e.stopPropagation(); onToggleStatus(ep.id, ep.status); }} disabled={saving}/>
                     </div>
@@ -561,14 +644,14 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving, role, on
                     {/* Deadline */}
                     <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                       <div style={{ width:8, height:8, borderRadius:"50%", background:dColor, flexShrink:0 }}/>
-                      <span style={{ fontSize:10, color:dColor, fontFamily:"monospace", fontWeight:700 }}>
+                      <span style={{ fontSize:10, color:dColor, fontFamily:F_MONO, fontWeight:700 }}>
                         {formatDate(ep.date)} — {ep.status==="posted" ? "✓ Posted" : deadlineLabel(days)}
                       </span>
                     </div>
 
                     {/* Days between episodes */}
                     {i < episodes.length - 1 && (
-                      <div style={{ marginTop:6, fontSize:9, color:MUTED, fontFamily:"monospace" }}>
+                      <div style={{ marginTop:6, fontSize:9, color:MUTED, fontFamily:F_MONO }}>
                         → Part {ep.part+1} in {daysUntil(episodes[i+1].date) - daysUntil(ep.date)} days
                       </div>
                     )}
@@ -578,7 +661,7 @@ function SerienTab({ series, reels, onOpenReel, onToggleStatus, saving, role, on
             </div>}
 
             {isExpanded && episodes.length === 0 && (
-              <div style={{ fontSize:12, color:MUTED, fontFamily:"monospace" }}>No episodes planned yet.</div>
+              <div style={{ fontSize:12, color:MUTED, fontFamily:F_MONO }}>No episodes planned yet.</div>
             )}
           </div>
         );
@@ -596,7 +679,7 @@ function EditRow({ label, value, onChange, area }) {
   const base = { width:"100%", padding:"10px 12px", borderRadius:8, border:`1px solid ${BORDER}`, fontSize:14, boxSizing:"border-box", background:"#FCFAF6", color:TEXT };
   return (
     <div>
-      <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:5 }}>{label}</div>
+      <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:F_MONO, marginBottom:5 }}>{label}</div>
       {area
         ? <textarea value={value} onChange={e=>onChange(e.target.value)} rows={3} style={{ ...base, fontFamily:"inherit", resize:"vertical" }}/>
         : <input value={value} onChange={e=>onChange(e.target.value)} style={base}/>}
@@ -604,34 +687,45 @@ function EditRow({ label, value, onChange, area }) {
   );
 }
 
-function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus, onUpdateDriveLink, onUpdateReel, saving, analytics, onSaveAnalytics }) {
+function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus, onUpdateDriveLink, onUpdateReel, role, saving, analytics, onSaveAnalytics }) {
   const m     = useIsMobile();
   useSwipeBack(onClose);
   const color = bc(brand);
   const sObj  = reel.type==="SERIES" ? series.find(s=>s.id===reel.series_id) : null;
   const tc    = sObj?.color || color;
-  const [av, setAv] = useState({ views:analytics?.views||"", likes:analytics?.likes||"", shares:analytics?.shares||"", saves:analytics?.saves||"" });
+  const [av, setAv] = useState({ views:analytics?.views||"", likes:analytics?.likes||"", comments:analytics?.comments||"", shares:analytics?.shares||"", saves:analytics?.saves||"" });
   // Analytics is loaded lazily after the modal opens — sync the form when it arrives.
   useEffect(() => {
-    setAv({ views:analytics?.views||"", likes:analytics?.likes||"", shares:analytics?.shares||"", saves:analytics?.saves||"" });
+    setAv({ views:analytics?.views||"", likes:analytics?.likes||"", comments:analytics?.comments||"", shares:analytics?.shares||"", saves:analytics?.saves||"" });
   }, [analytics]);
 
   // Inline edit of the reel's content (title, hook, caption, …). Any logged-in user may edit.
   const [editing, setEditing] = useState(false);
-  const [ef, setEf] = useState({ title:reel.title||"", hook:reel.hook||"", description:reel.description||"", format:reel.format||"", caption:reel.caption||"", notes:reel.notes||"" });
+  const [ef, setEf] = useState({ title:reel.title||"", hook:reel.hook||"", description:reel.description||"", format:reel.format||"", caption:reel.caption||"", notes:reel.notes||"", date:reel.date||"", assignee:reel.assignee||"", pillar:reel.pillar||"", est_length:reel.est_length||"", reference_link:reel.reference_link||"" });
   useEffect(() => {
-    setEf({ title:reel.title||"", hook:reel.hook||"", description:reel.description||"", format:reel.format||"", caption:reel.caption||"", notes:reel.notes||"" });
+    setEf({ title:reel.title||"", hook:reel.hook||"", description:reel.description||"", format:reel.format||"", caption:reel.caption||"", notes:reel.notes||"", date:reel.date||"", assignee:reel.assignee||"", pillar:reel.pillar||"", est_length:reel.est_length||"", reference_link:reel.reference_link||"" });
     setEditing(false);
+    // Intentionally keyed on reel.id only: re-running on every field change
+    // would wipe what the user is typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reel.id]);
+  const [editErr, setEditErr] = useState(null);
   const saveEdit = async () => {
-    if (!ef.title.trim() || !onUpdateReel) return;
-    await onUpdateReel(reel.id, ef);
+    setEditErr(null);
+    if (!onUpdateReel) return;
+    if (!ef.title.trim()) { setEditErr("Title can't be empty."); return; }
+    // The date field is free text — normalise 26.08.26 / 26.08.2026 and reject
+    // anything Postgres would refuse (reels.date is NOT NULL).
+    const d = normDate(ef.date);
+    if (!d) { setEditErr("Date must be a real date, e.g. 2026-09-26 or 26.09.26."); return; }
+    const res = await onUpdateReel(reel.id, { ...ef, date: d });
+    if (res && res.ok === false) { setEditErr(res.error || "Saving failed — nothing was changed."); return; }
     setEditing(false);
   };
 
   const IB = ({ label, value }) => value ? (
     <div style={{ marginBottom:16 }}>
-      <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:5 }}>{label}</div>
+      <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:F_MONO, marginBottom:5 }}>{label}</div>
       <div style={{ fontSize:14, color:TEXT, lineHeight:1.7 }}>{value}</div>
     </div>
   ) : null;
@@ -644,15 +738,15 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
         <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:20 }}>
           <div style={{ flex:1, minWidth:0 }}>
             <div style={{ display:"flex", gap:6, alignItems:"center", marginBottom:6, flexWrap:"wrap" }}>
-              <div style={{ padding:"3px 10px", borderRadius:4, background:`${color}18`, border:`1px solid ${color}55`, fontSize:10, fontFamily:"monospace", color }}>{brand==="franz"?"FRANZ":"TGC"} · {formatDate(reel.date)}</div>
-              {reel.type==="SERIES"&&sObj&&<div style={{ padding:"3px 10px", borderRadius:4, background:`${tc}18`, border:`1px solid ${tc}55`, fontSize:10, fontFamily:"monospace", color:tc }}>{sObj.name} · Pt {reel.part}</div>}
+              <div style={{ padding:"3px 10px", borderRadius:4, background:`${color}18`, border:`1px solid ${color}55`, fontSize:10, fontFamily:F_MONO, color }}>{brand==="franz"?"FRANZ":"TGC"} · {formatDate(reel.date)}</div>
+              {reel.type==="SERIES"&&sObj&&<div style={{ padding:"3px 10px", borderRadius:4, background:`${tc}18`, border:`1px solid ${tc}55`, fontSize:10, fontFamily:F_MONO, color:tc }}>{sObj.name} · Pt {reel.part}</div>}
               <StatusBadge status={reel.status} onClick={() => onToggleStatus(reel.id, reel.status)} disabled={saving}/>
             </div>
             <div style={{ fontSize:m?20:24, fontWeight:700, color:TEXT }}>{reel.title}</div>
           </div>
           <div style={{ display:"flex", gap:6, flexShrink:0 }}>
             {onUpdateReel && !editing && (
-              <button onClick={()=>setEditing(true)} title="Edit" style={{ background:"none", border:`1px solid ${BORDER}`, color:MUTED, fontSize:13, cursor:"pointer", padding:"0 12px", height:44, borderRadius:8, fontFamily:"monospace" }}>✏️ Edit</button>
+              <button onClick={()=>setEditing(true)} title="Edit" style={{ background:"none", border:`1px solid ${BORDER}`, color:MUTED, fontSize:13, cursor:"pointer", padding:"0 12px", height:44, borderRadius:8, fontFamily:F_MONO }}>✏️ Edit</button>
             )}
             <button onClick={onClose} style={{ background:"none", border:"none", color:MUTED, fontSize:22, cursor:"pointer", padding:"12px", lineHeight:1, minWidth:48, minHeight:48, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:8 }}>✕</button>
           </div>
@@ -663,11 +757,19 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
         {editing ? (
           <div style={{ marginBottom:20, display:"flex", flexDirection:"column", gap:12 }}>
             <EditRow label="Title" value={ef.title} onChange={v=>setEf(p=>({...p,title:v}))}/>
-            <EditRow label="Hook – erste 2 Sekunden" value={ef.hook} onChange={v=>setEf(p=>({...p,hook:v}))} area/>
+            <div style={{ display:"grid", gridTemplateColumns:m?"1fr 1fr":"repeat(4, 1fr)", gap:10 }}>
+              <EditRow label="Date (YYYY-MM-DD)" value={ef.date} onChange={v=>setEf(p=>({...p,date:v}))}/>
+              <EditRow label="Owner" value={ef.assignee} onChange={v=>setEf(p=>({...p,assignee:v}))}/>
+              <EditRow label="Pillar" value={ef.pillar} onChange={v=>setEf(p=>({...p,pillar:v}))}/>
+              <EditRow label="Est. length" value={ef.est_length} onChange={v=>setEf(p=>({...p,est_length:v}))}/>
+            </div>
+            <EditRow label="Hook — first 2 seconds" value={ef.hook} onChange={v=>setEf(p=>({...p,hook:v}))} area/>
             <EditRow label="What to film" value={ef.description} onChange={v=>setEf(p=>({...p,description:v}))} area/>
             <EditRow label="Format & Style" value={ef.format} onChange={v=>setEf(p=>({...p,format:v}))} area/>
             <EditRow label="Caption" value={ef.caption} onChange={v=>setEf(p=>({...p,caption:v}))} area/>
+            <EditRow label="Reference link" value={ef.reference_link} onChange={v=>setEf(p=>({...p,reference_link:v}))}/>
             <EditRow label="Director's Note" value={ef.notes} onChange={v=>setEf(p=>({...p,notes:v}))} area/>
+            {editErr && <div style={{ fontSize:13, color:RED, background:`${RED}0F`, border:`1px solid ${RED}44`, borderRadius:8, padding:"9px 12px" }}>{editErr}</div>}
             <div style={{ display:"flex", gap:8, marginTop:4 }}>
               <button onClick={saveEdit} disabled={saving} style={{ padding:"11px 20px", borderRadius:8, border:"none", background:TEXT, color:BG, fontSize:14, fontWeight:600, cursor:saving?"default":"pointer", opacity:saving?0.6:1 }}>{saving?"Saving…":"Save"}</button>
               <button onClick={()=>setEditing(false)} style={{ padding:"11px 16px", borderRadius:8, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:14, cursor:"pointer" }}>Cancel</button>
@@ -675,27 +777,61 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
           </div>
         ) : (
           <>
-            <IB label="Hook – erste 2 Sekunden" value={reel.hook}/>
-            <IB label="What to film" value={reel.description}/>
-            <IB label="Format & Style" value={reel.format}/>
+            {/* Meta grid — the content-plan facts at a glance */}
+            <div style={{ display:"grid", gridTemplateColumns:m?"1fr 1fr":"repeat(3, 1fr)", gap:10, marginBottom:18 }}>
+              {[["Posting date", formatDate(reel.date)],
+                ["Owner", reel.assignee || "—"],
+                ["Pillar", reel.pillar || "—"],
+                ["Format", reel.format || "—"],
+                ["Est. length", reel.est_length || "—"],
+                ["Status", STATUS_LABEL[reel.status]]].map(([l, v]) => (
+                <div key={l} style={{ background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10, padding:"10px 12px" }}>
+                  <div style={{ ...LBL, fontSize:9.5, marginBottom:4 }}>{l}</div>
+                  <div style={{ fontSize:14, fontWeight:600, color: l==="Owner" ? aColor(reel.assignee) : TEXT }}>{v}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Approval */}
+            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:18, padding:"12px 14px", borderRadius:10, background: reel.approved ? `${GREEN}0D` : `${AMBER}0D`, border:`1px solid ${reel.approved ? GREEN : AMBER}44` }}>
+              <Chip text={reel.approved ? "✓ Approved" : "Pending approval"} color={reel.approved ? GREEN : AMBER} filled/>
+              <div style={{ flex:1, fontSize:12.5, color:MUTED }}>{reel.approved ? "This piece is signed off for the monthly plan." : "Not signed off yet."}</div>
+              {role === "admin" && onUpdateReel && (
+                <button disabled={saving} onClick={() => onUpdateReel(reel.id, { approved: !reel.approved })}
+                  style={{ padding:"8px 14px", borderRadius:8, border:`1px solid ${reel.approved ? BORDER : GREEN}`, background: reel.approved ? "transparent" : GREEN, color: reel.approved ? MUTED : "#fff", fontSize:12.5, fontWeight:600, cursor:"pointer", whiteSpace:"nowrap" }}>
+                  {reel.approved ? "Revoke" : "Approve"}
+                </button>
+              )}
+            </div>
+
+            <IB label="Hook — first 2 seconds" value={reel.hook}/>
+            <IB label="Concept — what to film" value={reel.description}/>
+            {reel.reference_link && (
+              <div style={{ marginBottom:16 }}>
+                <div style={{ ...LBL, fontSize:10, marginBottom:5 }}>Reference</div>
+                <a href={reel.reference_link} target="_blank" rel="noopener noreferrer" style={{ fontSize:13.5, color:BUILD, wordBreak:"break-all" }}>{reel.reference_link}</a>
+              </div>
+            )}
 
             {reel.notes && (
               <div style={{ marginBottom:16, padding:"14px 16px", background:`${color}0F`, border:`1px solid ${color}33`, borderRadius:10 }}>
-                <div style={{ fontSize:10, color, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:6 }}>Director's Note</div>
+                <div style={{ fontSize:10, color, letterSpacing:"2px", textTransform:"uppercase", fontFamily:F_MONO, marginBottom:6 }}>Director's Note</div>
                 <div style={{ fontSize:13, color:TEXT, lineHeight:1.7, fontStyle:"italic" }}>{reel.notes}</div>
               </div>
             )}
 
-            <div style={{ marginBottom:16, padding:"12px 16px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10 }}>
-              <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:6 }}>Caption</div>
-              <div style={{ fontSize:14, color:TEXT, fontStyle:"italic" }}>"{reel.caption}"</div>
-            </div>
+            {reel.caption && (
+              <div style={{ marginBottom:16, padding:"12px 16px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10 }}>
+                <div style={{ ...LBL, fontSize:10, marginBottom:6 }}>Caption</div>
+                <div style={{ fontSize:14, color:TEXT, fontStyle:"italic" }}>"{reel.caption}"</div>
+              </div>
+            )}
           </>
         )}
 
         {/* Status — any of the 3 stages can be clicked to set directly */}
         <div style={{ marginBottom:20 }}>
-          <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:10 }}>STATUS — TAP TO CHANGE</div>
+          <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:F_MONO, marginBottom:10 }}>STATUS — TAP TO CHANGE</div>
           <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
             {STATUS_FLOW.map((s, i) => {
               const isActive = reel.status === s;
@@ -703,7 +839,7 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
               return (
                 <button key={s} disabled={saving}
                   onClick={() => !saving && onSetStatus && onSetStatus(reel.id, s)}
-                  style={{ padding:"10px 18px", borderRadius:24, border:`2px solid ${isActive?sColor:BORDER}`, background:isActive?sColor:"transparent", color:isActive?"#fff":sColor, fontSize:12, fontFamily:"monospace", fontWeight:isActive?700:600, cursor:saving?"default":"pointer", transition:"all 0.15s", minHeight:44, letterSpacing:"0.5px" }}>
+                  style={{ padding:"10px 18px", borderRadius:24, border:`2px solid ${isActive?sColor:BORDER}`, background:isActive?sColor:"transparent", color:isActive?"#fff":sColor, fontSize:12, fontFamily:F_MONO, fontWeight:isActive?700:600, cursor:saving?"default":"pointer", transition:"all 0.15s", minHeight:44, letterSpacing:"0.5px" }}>
                   {s === "planned" && "○ "}{s === "filmed" && "◑ "}{s === "posted" && "● "}
                   {STATUS_LABEL[s]}
                 </button>
@@ -711,7 +847,7 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
             })}
           </div>
           {reel.posted_at && (
-            <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", marginTop:8 }}>
+            <div style={{ fontSize:10, color:MUTED, fontFamily:F_MONO, marginTop:8 }}>
               ✓ Posted: {new Date(reel.posted_at).toLocaleString("en-GB", {day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"})}
             </div>
           )}
@@ -720,11 +856,11 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
         {/* File Name — Naming Convention Display */}
         {reel.file_name && (
           <div style={{ marginBottom:16, padding:"12px 14px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10 }}>
-            <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:6 }}>FILE NAME (TAP TO COPY)</div>
+            <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:F_MONO, marginBottom:6 }}>FILE NAME (TAP TO COPY)</div>
             <div onClick={() => {
               navigator.clipboard.writeText(reel.file_name);
               window.alert("Copied: " + reel.file_name);
-            }} style={{ fontSize:12, color:TEXT, fontFamily:"monospace", padding:"8px 10px", background:CARD, border:`1px solid ${BORDER}`, borderRadius:6, cursor:"pointer", wordBreak:"break-all" }}>
+            }} style={{ fontSize:12, color:TEXT, fontFamily:F_MONO, padding:"8px 10px", background:CARD, border:`1px solid ${BORDER}`, borderRadius:6, cursor:"pointer", wordBreak:"break-all" }}>
               {reel.file_name} 📋
             </div>
           </div>
@@ -732,7 +868,7 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
 
         {/* Drive Folder Section */}
         <div style={{ marginBottom:20, padding:m?"14px":"16px 18px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:12 }}>
-          <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:10 }}>📁 GOOGLE DRIVE</div>
+          <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:F_MONO, marginBottom:10 }}>📁 GOOGLE DRIVE</div>
           
           <div style={{ fontSize:12, color:TEXT, lineHeight:1.5, marginBottom:12 }}>
             Upload the final reel using the file name above. Click the folder button to open the right Drive folder.
@@ -741,31 +877,31 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
           {/* Folder Buttons */}
           <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
             <a href={DRIVE_FOLDERS[brand?.toLowerCase()] || DRIVE_FOLDERS.franz} target="_blank" rel="noopener noreferrer"
-              style={{ display:"inline-block", padding:"10px 16px", background:brand?.toLowerCase()==="tgc"?TGC:FRANZ, color:"#fff", borderRadius:8, textDecoration:"none", fontSize:12, fontFamily:"monospace", fontWeight:600 }}>
+              style={{ display:"inline-block", padding:"10px 16px", background:brand?.toLowerCase()==="tgc"?TGC:FRANZ, color:"#fff", borderRadius:8, textDecoration:"none", fontSize:12, fontFamily:F_MONO, fontWeight:600 }}>
               📁 OPEN FINAL FOLDER
             </a>
             <a href={DRIVE_RAW_FOLDERS[brand?.toLowerCase()] || DRIVE_RAW_FOLDERS.franz} target="_blank" rel="noopener noreferrer"
-              style={{ display:"inline-block", padding:"10px 16px", background:"transparent", border:`1px solid ${BORDER}`, color:MUTED, borderRadius:8, textDecoration:"none", fontSize:12, fontFamily:"monospace", fontWeight:600 }}>
+              style={{ display:"inline-block", padding:"10px 16px", background:"transparent", border:`1px solid ${BORDER}`, color:MUTED, borderRadius:8, textDecoration:"none", fontSize:12, fontFamily:F_MONO, fontWeight:600 }}>
               📂 RAW FOLDER
             </a>
           </div>
 
           {/* Optional Drive Link to specific file */}
-          <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:6, marginTop:14 }}>DIRECT LINK TO FILE (OPTIONAL)</div>
+          <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:F_MONO, marginBottom:6, marginTop:14 }}>DIRECT LINK TO FILE (OPTIONAL)</div>
           {reel.drive_link ? (
             <div>
               <a href={reel.drive_link} target="_blank" rel="noopener noreferrer"
-                style={{ display:"inline-block", padding:"8px 14px", background:BUILD, color:"#fff", borderRadius:8, textDecoration:"none", fontSize:11, fontFamily:"monospace", fontWeight:600, marginRight:8 }}>
+                style={{ display:"inline-block", padding:"8px 14px", background:BUILD, color:"#fff", borderRadius:8, textDecoration:"none", fontSize:11, fontFamily:F_MONO, fontWeight:600, marginRight:8 }}>
                 ▶ VIEW THIS REEL
               </a>
               <button onClick={async () => {
                 if (window.confirm("Remove drive link?")) {
                   await onUpdateDriveLink && onUpdateDriveLink(reel.id, "");
                 }
-              }} style={{ padding:"8px 12px", background:"transparent", border:`1px solid ${BORDER}`, color:MUTED, fontSize:10, fontFamily:"monospace", cursor:"pointer", borderRadius:8 }}>
+              }} style={{ padding:"8px 12px", background:"transparent", border:`1px solid ${BORDER}`, color:MUTED, fontSize:10, fontFamily:F_MONO, cursor:"pointer", borderRadius:8 }}>
                 ✕ Remove
               </button>
-              <div style={{ fontSize:10, color:MUTED, marginTop:8, fontFamily:"monospace", wordBreak:"break-all" }}>{reel.drive_link}</div>
+              <div style={{ fontSize:10, color:MUTED, marginTop:8, fontFamily:F_MONO, wordBreak:"break-all" }}>{reel.drive_link}</div>
             </div>
           ) : (
             <div>
@@ -782,8 +918,8 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
                     e.target.value = "";
                   }
                 }}
-                style={{ width:"100%", padding:"8px 10px", border:`1px solid ${BORDER}`, borderRadius:8, fontSize:11, fontFamily:"monospace", background:CARD, color:TEXT, boxSizing:"border-box" }}/>
-              <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", marginTop:4 }}>
+                style={{ width:"100%", padding:"8px 10px", border:`1px solid ${BORDER}`, borderRadius:8, fontSize:11, fontFamily:F_MONO, background:CARD, color:TEXT, boxSizing:"border-box" }}/>
+              <div style={{ fontSize:10, color:MUTED, fontFamily:F_MONO, marginTop:4 }}>
                 Auto-sets status to "Filmed" when link is added
               </div>
             </div>
@@ -792,13 +928,13 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
 
         {/* Analytics */}
         <div style={{ marginBottom:20 }}>
-          <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:10 }}>Analytics</div>
+          <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:F_MONO, marginBottom:10 }}>Analytics</div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-            {["views","likes","shares","saves"].map(metric => (
+            {["views","likes","comments","shares","saves"].map(metric => (
               <div key={metric}>
-                <div style={{ fontSize:9, color:MUTED, fontFamily:"monospace", textTransform:"uppercase", marginBottom:4 }}>{metric}</div>
+                <div style={{ fontSize:9, color:MUTED, fontFamily:F_MONO, textTransform:"uppercase", marginBottom:4 }}>{metric}</div>
                 <input type="number" placeholder="—" value={av[metric]} onChange={e => setAv(p=>({...p,[metric]:e.target.value}))}
-                  style={{ width:"100%", padding:"10px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:6, color:TEXT, fontSize:14, fontFamily:"monospace", boxSizing:"border-box", minHeight:44 }}/>
+                  style={{ width:"100%", padding:"10px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:6, color:TEXT, fontSize:14, fontFamily:F_MONO, boxSizing:"border-box", minHeight:44 }}/>
               </div>
             ))}
           </div>
@@ -858,8 +994,8 @@ function CalendarGrid({ reels, stories, onDayClick }) {
     const tRd = tR.some(r => r.status==="posted");
     const fRf = fR.some(r => r.status==="filmed");
     const tRf = tR.some(r => r.status==="filmed");
-    const fSd = fS.reduce((n,s) => n+["morning","midday","evening"].filter(sl=>s[`${sl}_status`]==="posted").length, 0);
-    const tSd = tS.reduce((n,s) => n+["morning","midday","evening"].filter(sl=>s[`${sl}_status`]==="posted").length, 0);
+    const fSd = fS.reduce((n,s) => n+countPostedSlots(s), 0);
+    const tSd = tS.reduce((n,s) => n+countPostedSlots(s), 0);
     return { fR, tR, fS, tS, fRd, tRd, fRf, tRf, fSd, tSd };
   };
 
@@ -867,8 +1003,8 @@ function CalendarGrid({ reels, stories, onDayClick }) {
     <div>
       {/* View Mode Toggle */}
       <div style={{ display:"flex", justifyContent:"center", marginBottom:14, gap:4 }}>
-        <button onClick={()=>setViewMode("week")} style={{ padding:"8px 18px", borderRadius:8, border:`1px solid ${viewMode==="week"?TEXT:BORDER}`, background:viewMode==="week"?TEXT:"transparent", color:viewMode==="week"?BG:MUTED, fontSize:11, fontFamily:"monospace", letterSpacing:"1px", cursor:"pointer", fontWeight:viewMode==="week"?700:400, minHeight:40 }}>WEEK</button>
-        <button onClick={()=>setViewMode("month")} style={{ padding:"8px 18px", borderRadius:8, border:`1px solid ${viewMode==="month"?TEXT:BORDER}`, background:viewMode==="month"?TEXT:"transparent", color:viewMode==="month"?BG:MUTED, fontSize:11, fontFamily:"monospace", letterSpacing:"1px", cursor:"pointer", fontWeight:viewMode==="month"?700:400, minHeight:40 }}>MONTH</button>
+        <button onClick={()=>setViewMode("week")} style={{ padding:"8px 18px", borderRadius:8, border:`1px solid ${viewMode==="week"?TEXT:BORDER}`, background:viewMode==="week"?TEXT:"transparent", color:viewMode==="week"?BG:MUTED, fontSize:11, fontFamily:F_MONO, letterSpacing:"1px", cursor:"pointer", fontWeight:viewMode==="week"?700:400, minHeight:40 }}>WEEK</button>
+        <button onClick={()=>setViewMode("month")} style={{ padding:"8px 18px", borderRadius:8, border:`1px solid ${viewMode==="month"?TEXT:BORDER}`, background:viewMode==="month"?TEXT:"transparent", color:viewMode==="month"?BG:MUTED, fontSize:11, fontFamily:F_MONO, letterSpacing:"1px", cursor:"pointer", fontWeight:viewMode==="month"?700:400, minHeight:40 }}>MONTH</button>
       </div>
 
       {viewMode === "week" ? (
@@ -877,7 +1013,7 @@ function CalendarGrid({ reels, stories, onDayClick }) {
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
             <button onClick={prevWeek} style={{ background:"none", border:`1px solid ${BORDER}`, borderRadius:8, width:44, height:44, cursor:"pointer", color:MUTED, fontSize:22, display:"flex", alignItems:"center", justifyContent:"center" }}>‹</button>
             <div style={{ textAlign:"center" }}>
-              <div style={{ fontSize:m?11:13, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:2 }}>{weekHeaderMonth.toUpperCase()}</div>
+              <div style={{ fontSize:m?11:13, color:MUTED, fontFamily:F_MONO, letterSpacing:"2px", marginBottom:2 }}>{weekHeaderMonth.toUpperCase()}</div>
               <div style={{ fontSize:m?16:18, fontWeight:700, color:TEXT }}>{weekRange}</div>
             </div>
             <button onClick={nextWeek} style={{ background:"none", border:`1px solid ${BORDER}`, borderRadius:8, width:44, height:44, cursor:"pointer", color:MUTED, fontSize:22, display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
@@ -892,7 +1028,7 @@ function CalendarGrid({ reels, stories, onDayClick }) {
               const dayName = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()];
               const totalReels = data.fR.length + data.tR.length;
               const totalStoriesPosted = data.fSd + data.tSd;
-              const totalStoriesPlanned = (data.fS.length>0?3:0) + (data.tS.length>0?3:0);
+              const totalStoriesPlanned = [...data.fS, ...data.tS].reduce((n,s)=>n+countFilledSlots(s), 0);
 
               return (
                 <div key={dStr} onClick={() => onDayClick(d.getDate(), d.getFullYear(), d.getMonth())}
@@ -903,30 +1039,30 @@ function CalendarGrid({ reels, stories, onDayClick }) {
                   <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:totalReels>0||totalStoriesPlanned>0?10:0 }}>
                     <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                       <div style={{ width:m?40:48, textAlign:"center" }}>
-                        <div style={{ fontSize:9, color:isToday?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700, marginBottom:2 }}>{dayName.toUpperCase()}</div>
+                        <div style={{ fontSize:9, color:isToday?FRANZ:MUTED, fontFamily:F_MONO, fontWeight:700, marginBottom:2 }}>{dayName.toUpperCase()}</div>
                         <div style={{ fontSize:m?20:24, fontWeight:700, color:isToday?FRANZ:TEXT, lineHeight:1 }}>{d.getDate()}</div>
                       </div>
-                      {isToday && <div style={{ padding:"3px 8px", borderRadius:4, background:FRANZ, fontSize:9, color:"#fff", fontFamily:"monospace", fontWeight:700, letterSpacing:"1px" }}>TODAY</div>}
+                      {isToday && <div style={{ padding:"3px 8px", borderRadius:4, background:FRANZ, fontSize:9, color:"#fff", fontFamily:F_MONO, fontWeight:700, letterSpacing:"1px" }}>TODAY</div>}
                     </div>
                     {totalReels===0 && totalStoriesPlanned===0 && (
-                      <span style={{ fontSize:10, color:MUTED, fontFamily:"monospace", fontStyle:"italic" }}>No content planned</span>
+                      <span style={{ fontSize:10, color:MUTED, fontFamily:F_MONO, fontStyle:"italic" }}>No content planned</span>
                     )}
                   </div>
 
                   {/* Franz Row */}
                   {(data.fR.length>0 || data.fS.length>0) && (
                     <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", background:`${FRANZ}0A`, border:`1px solid ${FRANZ}33`, borderRadius:8, marginBottom:6 }}>
-                      <div style={{ fontSize:9, color:FRANZ, fontFamily:"monospace", fontWeight:700, width:m?42:50, flexShrink:0 }}>FRANZ</div>
+                      <div style={{ fontSize:9, color:FRANZ, fontFamily:F_MONO, fontWeight:700, width:m?42:50, flexShrink:0 }}>FRANZ</div>
                       {data.fR.length>0 ? (
                         <div style={{ display:"flex", alignItems:"center", gap:5, flex:1, minWidth:0 }}>
                           <div style={{ width:8, height:8, borderRadius:"50%", background:data.fRd?FRANZ:data.fRf?AMBER:`${FRANZ}55`, flexShrink:0 }}/>
                           <span style={{ fontSize:m?11:12, color:data.fRd?FRANZ:TEXT, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>{data.fR[0]?.title}</span>
-                          <span style={{ fontSize:9, color:data.fRd?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700, flexShrink:0 }}>{data.fRd?"✓":data.fRf?"FILMED":"PLANNED"}</span>
+                          <span style={{ fontSize:9, color:data.fRd?FRANZ:MUTED, fontFamily:F_MONO, fontWeight:700, flexShrink:0 }}>{data.fRd?"✓":data.fRf?"FILMED":"PLANNED"}</span>
                         </div>
                       ) : <div style={{ flex:1, fontSize:10, color:MUTED, fontStyle:"italic" }}>No reel</div>}
                       {data.fS.length>0 && (
                         <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
-                          <span style={{ fontSize:10, color:data.fSd>0?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700 }}>{data.fSd}/3</span>
+                          <span style={{ fontSize:10, color:data.fSd>0?FRANZ:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{data.fSd}/3</span>
                           <div style={{ display:"flex", gap:2 }}>
                             {[0,1,2].map(i => <div key={i} style={{ width:5, height:5, borderRadius:"50%", background:i<data.fSd?FRANZ:`${FRANZ}33` }}/>)}
                           </div>
@@ -938,17 +1074,17 @@ function CalendarGrid({ reels, stories, onDayClick }) {
                   {/* TGC Row */}
                   {(data.tR.length>0 || data.tS.length>0) && (
                     <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", background:`${TGC}0A`, border:`1px solid ${TGC}33`, borderRadius:8 }}>
-                      <div style={{ fontSize:9, color:TGC, fontFamily:"monospace", fontWeight:700, width:m?42:50, flexShrink:0 }}>TGC</div>
+                      <div style={{ fontSize:9, color:TGC, fontFamily:F_MONO, fontWeight:700, width:m?42:50, flexShrink:0 }}>TGC</div>
                       {data.tR.length>0 ? (
                         <div style={{ display:"flex", alignItems:"center", gap:5, flex:1, minWidth:0 }}>
                           <div style={{ width:8, height:8, borderRadius:"50%", background:data.tRd?TGC:data.tRf?AMBER:`${TGC}55`, flexShrink:0 }}/>
                           <span style={{ fontSize:m?11:12, color:data.tRd?TGC:TEXT, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>{data.tR[0]?.title}</span>
-                          <span style={{ fontSize:9, color:data.tRd?TGC:MUTED, fontFamily:"monospace", fontWeight:700, flexShrink:0 }}>{data.tRd?"✓":data.tRf?"FILMED":"PLANNED"}</span>
+                          <span style={{ fontSize:9, color:data.tRd?TGC:MUTED, fontFamily:F_MONO, fontWeight:700, flexShrink:0 }}>{data.tRd?"✓":data.tRf?"FILMED":"PLANNED"}</span>
                         </div>
                       ) : <div style={{ flex:1, fontSize:10, color:MUTED, fontStyle:"italic" }}>No reel</div>}
                       {data.tS.length>0 && (
                         <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
-                          <span style={{ fontSize:10, color:data.tSd>0?TGC:MUTED, fontFamily:"monospace", fontWeight:700 }}>{data.tSd}/3</span>
+                          <span style={{ fontSize:10, color:data.tSd>0?TGC:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{data.tSd}/3</span>
                           <div style={{ display:"flex", gap:2 }}>
                             {[0,1,2].map(i => <div key={i} style={{ width:5, height:5, borderRadius:"50%", background:i<data.tSd?TGC:`${TGC}33` }}/>)}
                           </div>
@@ -968,14 +1104,14 @@ function CalendarGrid({ reels, stories, onDayClick }) {
             <button onClick={pm} style={{ background:"none", border:`1px solid ${BORDER}`, borderRadius:8, width:44, height:44, cursor:"pointer", color:MUTED, fontSize:22, display:"flex", alignItems:"center", justifyContent:"center" }}>‹</button>
             <div style={{ textAlign:"center" }}>
               <div style={{ fontSize:m?16:18, fontWeight:700, color:TEXT }}>{MONTH_NAMES[vM]} {vY}</div>
-              {!m && <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace" }}>Click any day to see details</div>}
+              {!m && <div style={{ fontSize:10, color:MUTED, fontFamily:F_MONO }}>Click any day to see details</div>}
             </div>
             <button onClick={nm} style={{ background:"none", border:`1px solid ${BORDER}`, borderRadius:8, width:44, height:44, cursor:"pointer", color:MUTED, fontSize:22, display:"flex", alignItems:"center", justifyContent:"center" }}>›</button>
           </div>
 
           {/* Month grid */}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:m?2:4, marginBottom:m?2:4 }}>
-            {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => <div key={d} style={{ textAlign:"center", fontSize:m?8:10, color:MUTED, fontFamily:"monospace", padding:"3px 0" }}>{d}</div>)}
+            {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d => <div key={d} style={{ textAlign:"center", fontSize:m?8:10, color:MUTED, fontFamily:F_MONO, padding:"3px 0" }}>{d}</div>)}
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:m?2:4 }}>
             {Array.from({length:sd}).map((_,i) => <div key={`e${i}`}/>)}
@@ -989,21 +1125,21 @@ function CalendarGrid({ reels, stories, onDayClick }) {
               return (
                 <div key={day} onClick={() => onDayClick(day, vY, vM)}
                   style={{ minHeight:m?60:78, borderRadius:m?6:8, padding:m?"4px":"6px 7px", background:isT?`${FRANZ}11`:CARD, border:`1px solid ${isT?FRANZ:BORDER}`, cursor:"pointer", transition:"all 0.15s" }}>
-                  <div style={{ fontSize:m?11:12, fontWeight:isT?700:500, color:isT?FRANZ:TEXT, marginBottom:m?3:4, fontFamily:"monospace" }}>{day}</div>
+                  <div style={{ fontSize:m?11:12, fontWeight:isT?700:500, color:isT?FRANZ:TEXT, marginBottom:m?3:4, fontFamily:F_MONO }}>{day}</div>
                   {(data.fR.length>0 || data.fS.length>0) && (
                     <div style={{ display:"flex", alignItems:"center", gap:3, marginBottom:m?3:4, padding:m?"2px 4px":"3px 5px", background:`${FRANZ}15`, borderRadius:m?4:6, border:`1px solid ${data.fRd?FRANZ:FRANZ+"44"}` }}>
                       {data.fR.length>0 && <div style={{ width:m?6:7, height:m?6:7, borderRadius:"50%", background:fDot, flexShrink:0 }}/>}
-                      {!m && data.fR[0] && <div style={{ fontSize:9, color:data.fRd?FRANZ:MUTED, fontFamily:"monospace", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>F · {data.fR[0]?.title.slice(0,12)}</div>}
-                      {m && data.fR.length>0 && <span style={{ fontSize:7, color:data.fRd?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700 }}>F</span>}
-                      {data.fS.length>0 && <span style={{ fontSize:m?7:8, color:data.fSd>0?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700, marginLeft:"auto" }}>{data.fSd}/3</span>}
+                      {!m && data.fR[0] && <div style={{ fontSize:9, color:data.fRd?FRANZ:MUTED, fontFamily:F_MONO, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>F · {data.fR[0]?.title.slice(0,12)}</div>}
+                      {m && data.fR.length>0 && <span style={{ fontSize:7, color:data.fRd?FRANZ:MUTED, fontFamily:F_MONO, fontWeight:700 }}>F</span>}
+                      {data.fS.length>0 && <span style={{ fontSize:m?7:8, color:data.fSd>0?FRANZ:MUTED, fontFamily:F_MONO, fontWeight:700, marginLeft:"auto" }}>{data.fSd}/3</span>}
                     </div>
                   )}
                   {(data.tR.length>0 || data.tS.length>0) && (
                     <div style={{ display:"flex", alignItems:"center", gap:3, marginBottom:m?2:3, padding:m?"2px 4px":"3px 5px", background:`${TGC}15`, borderRadius:m?4:6, border:`1px solid ${data.tRd?TGC:TGC+"44"}` }}>
                       {data.tR.length>0 && <div style={{ width:m?6:7, height:m?6:7, borderRadius:"50%", background:tDot, flexShrink:0 }}/>}
-                      {!m && data.tR[0] && <div style={{ fontSize:9, color:data.tRd?TGC:MUTED, fontFamily:"monospace", fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>T · {data.tR[0]?.title.slice(0,12)}</div>}
-                      {m && data.tR.length>0 && <span style={{ fontSize:7, color:data.tRd?TGC:MUTED, fontFamily:"monospace", fontWeight:700 }}>T</span>}
-                      {data.tS.length>0 && <span style={{ fontSize:m?7:8, color:data.tSd>0?TGC:MUTED, fontFamily:"monospace", fontWeight:700, marginLeft:"auto" }}>{data.tSd}/3</span>}
+                      {!m && data.tR[0] && <div style={{ fontSize:9, color:data.tRd?TGC:MUTED, fontFamily:F_MONO, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>T · {data.tR[0]?.title.slice(0,12)}</div>}
+                      {m && data.tR.length>0 && <span style={{ fontSize:7, color:data.tRd?TGC:MUTED, fontFamily:F_MONO, fontWeight:700 }}>T</span>}
+                      {data.tS.length>0 && <span style={{ fontSize:m?7:8, color:data.tSd>0?TGC:MUTED, fontFamily:F_MONO, fontWeight:700, marginLeft:"auto" }}>{data.tSd}/3</span>}
                     </div>
                   )}
                 </div>
@@ -1017,7 +1153,7 @@ function CalendarGrid({ reels, stories, onDayClick }) {
       <div style={{ display:"flex", gap:m?10:16, marginTop:14, flexWrap:"wrap", justifyContent:"center" }}>
         {[{color:FRANZ,label:"Franz posted"},{color:AMBER,label:"Filmed"},{color:MUTED,label:"Planned"},{color:TGC,label:"TGC posted"}].map(l => (
           <div key={l.label} style={{ display:"flex", alignItems:"center", gap:5 }}>
-            <div style={{ width:7, height:7, borderRadius:"50%", background:l.color }}/><span style={{ fontSize:9, color:MUTED, fontFamily:"monospace" }}>{l.label}</span>
+            <div style={{ width:7, height:7, borderRadius:"50%", background:l.color }}/><span style={{ fontSize:9, color:MUTED, fontFamily:F_MONO }}>{l.label}</span>
           </div>
         ))}
       </div>
@@ -1047,8 +1183,8 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6, flexWrap:"wrap", gap:6 }}>
           <div style={{ display:"flex", gap:6, alignItems:"center" }}>
             <div style={{ width:8, height:8, borderRadius:"50%", background:color }}/>
-            <span style={{ fontSize:11, color, fontFamily:"monospace", fontWeight:700 }}>{brand==="franz"?"FRANZ":"TGC"}</span>
-            {sObj && <span style={{ fontSize:10, color:sObj.color, fontFamily:"monospace" }}>{sObj.name} · Pt {reel.part}</span>}
+            <span style={{ fontSize:11, color, fontFamily:F_MONO, fontWeight:700 }}>{brand==="franz"?"FRANZ":"TGC"}</span>
+            {sObj && <span style={{ fontSize:10, color:sObj.color, fontFamily:F_MONO }}>{sObj.name} · Pt {reel.part}</span>}
           </div>
           <div onClick={e => e.stopPropagation()}>
             <StatusBadge status={reel.status} onClick={() => onToggleReel(reel.id, reel.status)} disabled={saving}/>
@@ -1056,7 +1192,7 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
         </div>
         <div style={{ fontSize:15, fontWeight:600, color:TEXT }}>{reel.title}</div>
         {reel.hook && <div style={{ fontSize:12, color:MUTED, fontStyle:"italic", marginTop:2 }}>"{reel.hook}"</div>}
-        <div style={{ fontSize:9, color:MUTED, fontFamily:"monospace", marginTop:6, letterSpacing:"1px" }}>TAP FOR DETAILS →</div>
+        <div style={{ fontSize:9, color:MUTED, fontFamily:F_MONO, marginTop:6, letterSpacing:"1px" }}>TAP FOR DETAILS →</div>
       </div>
     );
   };
@@ -1067,7 +1203,7 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
         {m && <div style={{ width:40, height:4, background:BORDER, borderRadius:2, margin:"0 auto 14px" }}/>}
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
           <div>
-            <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:3 }}>{MONTH_NAMES[month].toUpperCase()} {year}</div>
+            <div style={{ fontSize:10, color:MUTED, fontFamily:F_MONO, letterSpacing:"2px", marginBottom:3 }}>{MONTH_NAMES[month].toUpperCase()} {year}</div>
             <div style={{ fontSize:m?17:22, fontWeight:700, color:TEXT }}>{new Date(`${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}T00:00:00`).toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</div>
           </div>
           <button onClick={onClose} style={{ background:"none", border:"none", color:MUTED, fontSize:22, cursor:"pointer", padding:12, minWidth:48, minHeight:48, display:"flex", alignItems:"center", justifyContent:"center", borderRadius:8 }}>✕</button>
@@ -1079,13 +1215,13 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
           <div style={{ marginBottom:24 }}>
             <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
               <div style={{ height:2, flex:1, background:BORDER }}/>
-              <div style={{ fontSize:11, color:MUTED, fontFamily:"monospace", letterSpacing:"3px", fontWeight:700 }}>REELS</div>
+              <div style={{ fontSize:11, color:MUTED, fontFamily:F_MONO, letterSpacing:"3px", fontWeight:700 }}>REELS</div>
               <div style={{ height:2, flex:1, background:BORDER }}/>
             </div>
             {fR.map(r => <RR key={r.id} reel={r} brand="franz"/>)}
             {tR.map(r => <RR key={r.id} reel={r} brand="tgc"/>)}
-            {fR.length===0 && <div style={{ padding:"12px", border:`1px dashed ${BORDER}`, borderRadius:10, marginBottom:10, fontSize:11, color:MUTED, fontFamily:"monospace", textAlign:"center" }}>No Franz reel planned</div>}
-            {tR.length===0 && <div style={{ padding:"12px", border:`1px dashed ${BORDER}`, borderRadius:10, fontSize:11, color:MUTED, fontFamily:"monospace", textAlign:"center" }}>No TGC reel planned</div>}
+            {fR.length===0 && <div style={{ padding:"12px", border:`1px dashed ${BORDER}`, borderRadius:10, marginBottom:10, fontSize:11, color:MUTED, fontFamily:F_MONO, textAlign:"center" }}>No Franz reel planned</div>}
+            {tR.length===0 && <div style={{ padding:"12px", border:`1px dashed ${BORDER}`, borderRadius:10, fontSize:11, color:MUTED, fontFamily:F_MONO, textAlign:"center" }}>No TGC reel planned</div>}
           </div>
         )}
 
@@ -1094,7 +1230,7 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
           <div style={{ marginBottom:14 }}>
             <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
               <div style={{ height:2, flex:1, background:BORDER }}/>
-              <div style={{ fontSize:11, color:MUTED, fontFamily:"monospace", letterSpacing:"3px", fontWeight:700 }}>STORIES</div>
+              <div style={{ fontSize:11, color:MUTED, fontFamily:F_MONO, letterSpacing:"3px", fontWeight:700 }}>STORIES</div>
               <div style={{ height:2, flex:1, background:BORDER }}/>
             </div>
 
@@ -1110,14 +1246,14 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
               ];
               const doneCount = slots.filter(s => s.status === "posted").length;
               return (
-                <div key={story.id} style={{ background:doneCount===3?`${FRANZ}08`:CARD, border:`1px solid ${doneCount>0?FRANZ+"44":BORDER}`, borderLeft:`4px solid ${doneCount===3?FRANZ:doneCount>0?FRANZ+"88":BORDER}`, borderRadius:10, padding:12, marginBottom:10 }}>
+                <div key={story.id} style={{ background:doneCount>0&&doneCount>=countFilledSlots(story)?`${FRANZ}08`:CARD, border:`1px solid ${doneCount>0?FRANZ+"44":BORDER}`, borderLeft:`4px solid ${doneCount>0&&doneCount>=countFilledSlots(story)?FRANZ:doneCount>0?FRANZ+"88":BORDER}`, borderRadius:10, padding:12, marginBottom:10 }}>
                   <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
-                    <div style={{ fontSize:11, color:FRANZ, fontFamily:"monospace", fontWeight:700 }}>FRANZ STORIES</div>
+                    <div style={{ fontSize:11, color:FRANZ, fontFamily:F_MONO, fontWeight:700 }}>FRANZ STORIES</div>
                     <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                       <div style={{ display:"flex", gap:3 }}>
                         {slots.map(s => <div key={s.key} style={{ width:7, height:7, borderRadius:"50%", background:s.status==="posted"?FRANZ:BORDER }}/>)}
                       </div>
-                      <span style={{ fontSize:10, color:MUTED, fontFamily:"monospace", fontWeight:700 }}>{doneCount}/3</span>
+                      <span style={{ fontSize:10, color:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{doneCount}/{Math.max(countFilledSlots(story), doneCount)}</span>
                     </div>
                   </div>
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
@@ -1126,7 +1262,7 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
                       return (
                         <div key={slot.key} style={{ background:done?`${FRANZ}0F`:SOFT, border:`1px solid ${done?FRANZ+"55":BORDER}`, borderRadius:8, padding:"8px 7px", minHeight:80 }}>
                           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
-                            <span style={{ fontSize:8, color:done?FRANZ:MUTED, fontFamily:"monospace", fontWeight:700 }}>{slot.label.toUpperCase()}</span>
+                            <span style={{ fontSize:8, color:done?FRANZ:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{slot.label.toUpperCase()}</span>
                             <div onClick={() => onToggleStory && onToggleStory(story.id, slot.key, slot.status)}
                               style={{ width:18, height:18, borderRadius:"50%", background:done?FRANZ:"transparent", border:`1.5px solid ${done?FRANZ:BORDER}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, color:"#fff", cursor:"pointer", flexShrink:0 }}>{done?"✓":""}</div>
                           </div>
@@ -1151,14 +1287,14 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
               ];
               const doneCount = slots.filter(s => s.status === "posted").length;
               return (
-                <div key={story.id} style={{ background:doneCount===3?`${TGC}08`:CARD, border:`1px solid ${doneCount>0?TGC+"44":BORDER}`, borderLeft:`4px solid ${doneCount===3?TGC:doneCount>0?TGC+"88":BORDER}`, borderRadius:10, padding:12, marginBottom:10 }}>
+                <div key={story.id} style={{ background:doneCount>0&&doneCount>=countFilledSlots(story)?`${TGC}08`:CARD, border:`1px solid ${doneCount>0?TGC+"44":BORDER}`, borderLeft:`4px solid ${doneCount>0&&doneCount>=countFilledSlots(story)?TGC:doneCount>0?TGC+"88":BORDER}`, borderRadius:10, padding:12, marginBottom:10 }}>
                   <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
-                    <div style={{ fontSize:11, color:TGC, fontFamily:"monospace", fontWeight:700 }}>TGC STORIES</div>
+                    <div style={{ fontSize:11, color:TGC, fontFamily:F_MONO, fontWeight:700 }}>TGC STORIES</div>
                     <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                       <div style={{ display:"flex", gap:3 }}>
                         {slots.map(s => <div key={s.key} style={{ width:7, height:7, borderRadius:"50%", background:s.status==="posted"?TGC:BORDER }}/>)}
                       </div>
-                      <span style={{ fontSize:10, color:MUTED, fontFamily:"monospace", fontWeight:700 }}>{doneCount}/3</span>
+                      <span style={{ fontSize:10, color:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{doneCount}/{Math.max(countFilledSlots(story), doneCount)}</span>
                     </div>
                   </div>
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
@@ -1167,7 +1303,7 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
                       return (
                         <div key={slot.key} style={{ background:done?`${TGC}0F`:SOFT, border:`1px solid ${done?TGC+"55":BORDER}`, borderRadius:8, padding:"8px 7px", minHeight:80 }}>
                           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
-                            <span style={{ fontSize:8, color:done?TGC:MUTED, fontFamily:"monospace", fontWeight:700 }}>{slot.label.toUpperCase()}</span>
+                            <span style={{ fontSize:8, color:done?TGC:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{slot.label.toUpperCase()}</span>
                             <div onClick={() => onToggleStory && onToggleStory(story.id, slot.key, slot.status)}
                               style={{ width:18, height:18, borderRadius:"50%", background:done?TGC:"transparent", border:`1.5px solid ${done?TGC:BORDER}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, color:"#fff", cursor:"pointer", flexShrink:0 }}>{done?"✓":""}</div>
                           </div>
@@ -1182,7 +1318,7 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
           </div>
         )}
 
-        {fR.length===0&&tR.length===0&&fS.length===0&&tS.length===0&&<div style={{ textAlign:"center", padding:40, color:MUTED, fontFamily:"monospace" }}>No content for this day.</div>}
+        {fR.length===0&&tR.length===0&&fS.length===0&&tS.length===0&&<div style={{ textAlign:"center", padding:40, color:MUTED, fontFamily:F_MONO }}>No content for this day.</div>}
 
         <div style={{ display:"flex", justifyContent:"flex-end", marginTop:14 }}><Btn onClick={onClose} accent={MUTED}>CLOSE</Btn></div>
       </div>
@@ -1198,7 +1334,7 @@ function BriefingTab() {
 
   const Section = ({ title, color, children }) => (
     <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderLeft:`4px solid ${color}`, borderRadius:14, padding:m?"18px 16px":"24px 28px", marginBottom:14, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-      <div style={{ fontSize:11, color, fontFamily:"monospace", letterSpacing:"2px", fontWeight:700, marginBottom:12 }}>{title.toUpperCase()}</div>
+      <div style={{ fontSize:11, color, fontFamily:F_MONO, letterSpacing:"2px", fontWeight:700, marginBottom:12 }}>{title.toUpperCase()}</div>
       {children}
     </div>
   );
@@ -1212,7 +1348,7 @@ function BriefingTab() {
   );
 
   const Code = ({ children }) => (
-    <span style={{ background:SOFT, padding:"2px 7px", borderRadius:4, fontFamily:"monospace", fontSize:12, color:TEXT }}>{children}</span>
+    <span style={{ background:SOFT, padding:"2px 7px", borderRadius:4, fontFamily:F_MONO, fontSize:12, color:TEXT }}>{children}</span>
   );
 
   return (
@@ -1220,7 +1356,7 @@ function BriefingTab() {
 
       {/* Welcome Header */}
       <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14, padding:m?"20px 16px":"32px", marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-        <div style={{ fontSize:11, color:MUTED, fontFamily:"monospace", letterSpacing:"3px", marginBottom:6 }}>VIDEOGRAPHER ONBOARDING</div>
+        <div style={{ fontSize:11, color:MUTED, fontFamily:F_MONO, letterSpacing:"3px", marginBottom:6 }}>VIDEOGRAPHER ONBOARDING</div>
         <div style={{ fontSize:m?22:30, fontWeight:700, color:TEXT, marginBottom:8 }}>Welcome to the Team</div>
         <p style={{ fontSize:14, color:MUTED, lineHeight:1.6, marginBottom:0 }}>
           This is your everything-you-need-to-know guide. Read it once, then come back whenever you need a refresher.
@@ -1232,14 +1368,14 @@ function BriefingTab() {
       <Section title="The Two Brands" color={FRANZ}>
         <div style={{ display:"grid", gridTemplateColumns: m ? "1fr" : "1fr 1fr", gap:12 }}>
           <div style={{ padding:"14px 16px", background:`${FRANZ}0A`, border:`1px solid ${FRANZ}33`, borderRadius:10 }}>
-            <div style={{ fontSize:11, color:FRANZ, fontFamily:"monospace", fontWeight:700, letterSpacing:"2px", marginBottom:6 }}>FRANZ</div>
+            <div style={{ fontSize:11, color:FRANZ, fontFamily:F_MONO, fontWeight:700, letterSpacing:"2px", marginBottom:6 }}>FRANZ</div>
             <P><b>Cinnamon roll &amp; specialty coffee/matcha shop.</b></P>
             <P><b>USP:</b> free oat milk (rare in Bali).</P>
             <P><b>Vibe:</b> girly, aesthetic, premium, feminine. Soft pinks, creams, light wood.</P>
             <P><b>Hero products:</b> 6 iced matchas, 6 Fine Selection iced coffees, cinnamon rolls.</P>
           </div>
           <div style={{ padding:"14px 16px", background:`${TGC}0A`, border:`1px solid ${TGC}33`, borderRadius:10 }}>
-            <div style={{ fontSize:11, color:TGC, fontFamily:"monospace", fontWeight:700, letterSpacing:"2px", marginBottom:6 }}>THE GREEN COLLECTIVE</div>
+            <div style={{ fontSize:11, color:TGC, fontFamily:F_MONO, fontWeight:700, letterSpacing:"2px", marginBottom:6 }}>THE GREEN COLLECTIVE</div>
             <P><b>Premium health takeaway store.</b></P>
             <P><b>USP:</b> clean, transparent, California-grade wellness.</P>
             <P><b>Vibe:</b> clean, organic, premium. Raw concrete, kraft, glass, palm leaves.</P>
@@ -1315,7 +1451,7 @@ function BriefingTab() {
       <Section title="File Naming Convention" color={AMBER}>
         <P>Every file follows this format:</P>
         <div style={{ padding:"14px 16px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:8, marginBottom:12 }}>
-          <div style={{ fontSize:13, fontFamily:"monospace", color:TEXT, fontWeight:700 }}>YYYY-MM-DD_BRAND_TYPE_Title-With-Dashes</div>
+          <div style={{ fontSize:13, fontFamily:F_MONO, color:TEXT, fontWeight:700 }}>YYYY-MM-DD_BRAND_TYPE_Title-With-Dashes</div>
         </div>
         <P bold>Examples:</P>
         <ul style={{ marginTop:0, marginBottom:12, paddingLeft:24, listStyleType:"none" }}>
@@ -1340,7 +1476,7 @@ function BriefingTab() {
       {/* Drive Folder Structure */}
       <Section title="Google Drive Folder Structure" color={TGC}>
         <P>All videos go into Google Drive. Folder structure is set up by the team.</P>
-        <div style={{ padding:"16px 18px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10, fontFamily:"monospace", fontSize:13, color:TEXT, lineHeight:1.7 }}>
+        <div style={{ padding:"16px 18px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10, fontFamily:F_MONO, fontSize:13, color:TEXT, lineHeight:1.7 }}>
           📁 Content Archive<br/>
           &nbsp;&nbsp;└── 📁 2026-05-May<br/>
           &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;├── 📁 Franz<br/>
@@ -1430,7 +1566,7 @@ function BriefingTab() {
         <P>Lowercase. One line. Trust the visual. Confident understatement.</P>
         <div style={{ display:"grid", gridTemplateColumns: m ? "1fr" : "1fr 1fr", gap:12, marginTop:8 }}>
           <div style={{ padding:"12px 14px", background:`${TGC}0A`, border:`1px solid ${TGC}33`, borderRadius:10 }}>
-            <div style={{ fontSize:11, color:TGC, fontWeight:700, marginBottom:6, fontFamily:"monospace", letterSpacing:"1px" }}>DO</div>
+            <div style={{ fontSize:11, color:TGC, fontWeight:700, marginBottom:6, fontFamily:F_MONO, letterSpacing:"1px" }}>DO</div>
             <ul style={{ margin:0, paddingLeft:18, fontSize:13, color:TEXT, lineHeight:1.6 }}>
               <li>"oat milk is on us, always"</li>
               <li>"less sweet. more grown-up."</li>
@@ -1439,7 +1575,7 @@ function BriefingTab() {
             </ul>
           </div>
           <div style={{ padding:"12px 14px", background:`${FRANZ}0A`, border:`1px solid ${FRANZ}33`, borderRadius:10 }}>
-            <div style={{ fontSize:11, color:FRANZ, fontWeight:700, marginBottom:6, fontFamily:"monospace", letterSpacing:"1px" }}>DON'T</div>
+            <div style={{ fontSize:11, color:FRANZ, fontWeight:700, marginBottom:6, fontFamily:F_MONO, letterSpacing:"1px" }}>DON'T</div>
             <ul style={{ margin:0, paddingLeft:18, fontSize:13, color:TEXT, lineHeight:1.6 }}>
               <li>"We're proud to offer complimentary plant-based milk alternatives"</li>
               <li>"A balanced, sophisticated flavour profile"</li>
@@ -1463,7 +1599,7 @@ function BriefingTab() {
 
       {/* Final Note */}
       <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14, padding:m?"18px 16px":"24px 28px", marginBottom:24, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-        <div style={{ fontSize:11, color:MUTED, fontFamily:"monospace", letterSpacing:"2px", marginBottom:8 }}>FIRST WEEK NOTE</div>
+        <div style={{ fontSize:11, color:MUTED, fontFamily:F_MONO, letterSpacing:"2px", marginBottom:8 }}>FIRST WEEK NOTE</div>
         <P>First week is observation and shooting alongside Cory. By week two you'll be running shoots solo. Don't worry about getting everything right immediately. Bias toward shooting more than we need. The dashboard is the source of truth — when in doubt, check it.</P>
         <P bold>We meet weekly to review what worked and adjust. Welcome to the team.</P>
       </div>
@@ -1482,11 +1618,11 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
   const [saving,  setSaving]  = useState(false);
   const [error,   setError]   = useState(null);
 
-  const [tab,   setTab]   = useState("today");
+  const [tab,   setTab]   = useState("overview");
   const [brand, setBrand] = useState("franz");
 
   const [showAddReel,  setShowAddReel]  = useState(false);
-  const [newReel,      setNewReel]      = useState({ brand:"franz", date:"", title:"", caption:"", hook:"", description:"", format:"", notes:"", type:"REEL", series:"", part:"" });
+  const [newReel,      setNewReel]      = useState({ brand:"franz", date:"", title:"", caption:"", hook:"", description:"", format:"", notes:"", type:"REEL", series:"", part:"", assignee:"", pillar:"", est_length:"", reference_link:"" });
   const [showAddStory, setShowAddStory] = useState(false);
   const [newStory,     setNewStory]     = useState({ brand:"franz", date:"", slot1:"", slot2:"", slot3:"", slot4:"", slot5:"", slot6:"" });
   const [editSlot,     setEditSlot]     = useState(null);
@@ -1507,9 +1643,24 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
   const [showBulk,     setShowBulk]     = useState(false);
   const [bulkFile,     setBulkFile]     = useState(null);
   const [bulkPreview,  setBulkPreview]  = useState(null);
+  const [bulkBrand,    setBulkBrand]    = useState("franz");
   const [showPwd,      setShowPwd]      = useState(false);
   const [newPwd,       setNewPwd]       = useState("");
   const [pwdMsg,       setPwdMsg]       = useState(null);
+  const [anMap,        setAnMap]        = useState({});
+  const [anLoading,    setAnLoading]    = useState(false);
+
+  // Load all metrics when the Analytics tab opens (small table; fresh each visit).
+  useEffect(() => {
+    if (tab !== "analytics") return;
+    let active = true;
+    setAnLoading(true);
+    fetchAllAnalytics()
+      .then(rows => { if (!active) return; const mp = {}; rows.forEach(r => { mp[r.reel_id] = r; }); setAnMap(mp); })
+      .catch(() => {})
+      .finally(() => { if (active) setAnLoading(false); });
+    return () => { active = false; };
+  }, [tab]);
 
   const loadAll = useCallback(async () => {
     setLoading(true); setError(null);
@@ -1574,7 +1725,7 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
     try {
       const created = await addReel(newReel);
       setReels(prev => [...prev, created].sort((a,b)=>a.date.localeCompare(b.date)));
-      setNewReel({ brand:"franz", date:"", title:"", caption:"", hook:"", description:"", format:"", notes:"", type:"REEL", series:"", part:"" });
+      setNewReel({ brand:"franz", date:"", title:"", caption:"", hook:"", description:"", format:"", notes:"", type:"REEL", series:"", part:"", assignee:"", pillar:"", est_length:"", reference_link:"" });
       setShowAddReel(false);
     } catch(e){setError(e.message);}finally{setSaving(false);}
   };
@@ -1612,12 +1763,18 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
   };
 
   // Edit a reel's content (title/hook/caption/…) — any logged-in user.
+  // Returns {ok:true} / {ok:false,error} so the caller can keep an edit form
+  // open instead of closing it as if the save had succeeded.
   const handleUpdateReel = async (id, fields) => {
     setSaving(true); setError(null);
     try {
       const updated = await updateReel(id, fields);
       setReels(prev => prev.map(r => r.id===id ? {...r, ...updated} : r));
-    } catch(e){ setError("Update failed: " + e.message); }
+      return { ok: true };
+    } catch(e){
+      setError("Update failed: " + e.message);
+      return { ok: false, error: e.message };
+    }
     finally { setSaving(false); }
   };
 
@@ -1663,48 +1820,39 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
   };
 
   const handleSaveAnalytics = async (reelId, vals) => {
+    // All fields blank? Don't write a 0-view row — it would count as "tracked"
+    // and always win the lowest-views highlight.
+    if (!["views","likes","comments","shares","saves"].some(k => String(vals[k] ?? "").trim() !== "")) {
+      setDetailReel(null); return;
+    }
     setSaving(true);
-    try { await saveAnalytics(reelId, vals); setDetailReel(null); }
-    catch(e){setError(e.message);}finally{setSaving(false);}
+    try {
+      const row = await saveAnalytics(reelId, vals);
+      // Keep the Analytics page in sync — it renders from anMap, which is
+      // otherwise only filled when the tab is (re)opened.
+      if (row) { setAnMap(prev => ({ ...prev, [reelId]: row })); setDetailAnalytics(row); }
+      setDetailReel(null);
+    }
+    catch(e){setError("Saving metrics failed: " + e.message);}finally{setSaving(false);}
   };
 
   const handleBulkFile = (e) => {
     const file = e.target.files[0]; if (!file) return;
     setBulkFile(file);
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      const lines = ev.target.result.split("\n").filter(Boolean);
-      const headers = lines[0].split(",").map(h=>h.trim().replace(/"/g,""));
-      const rows = lines.slice(1).map(line => {
-        const vals = line.split(",").map(v=>v.trim().replace(/"/g,""));
-        return headers.reduce((obj,h,i)=>{obj[h]=vals[i]||"";return obj;},{});
-      });
-      setBulkPreview(rows.slice(0,5));
-    };
+    reader.onload = (ev) => setBulkPreview(normalizeBulkRows(ev.target.result, bulkBrand));
     reader.readAsText(file);
   };
 
   const handleBulkImport = async () => {
-    if (!bulkFile) return;
-    setSaving(true);
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      try {
-        const lines = ev.target.result.split("\n").filter(Boolean);
-        const headers = lines[0].split(",").map(h=>h.trim().replace(/"/g,""));
-        const rows = lines.slice(1).map(line=>{
-          const vals=line.split(",").map(v=>v.trim().replace(/"/g,""));
-          return headers.reduce((obj,h,i)=>{obj[h]=vals[i]||"";return obj;},{});
-        });
-        const reelRows  = rows.filter(r=>r.type==="REEL"||r.type==="SERIES");
-        const storyRows = rows.filter(r=>r.type==="STORY");
-        if (reelRows.length>0)  await bulkImportReels(reelRows);
-        if (storyRows.length>0) await bulkImportStories(storyRows);
-        await loadAll();
-        setShowBulk(false); setBulkFile(null); setBulkPreview(null);
-      } catch(e){setError(e.message);}finally{setSaving(false);}
-    };
-    reader.readAsText(bulkFile);
+    if (!bulkPreview || (bulkPreview.reels.length === 0 && bulkPreview.stories.length === 0)) return;
+    setSaving(true); setError(null);
+    try {
+      if (bulkPreview.reels.length > 0)   await bulkImportReels(bulkPreview.reels);
+      if (bulkPreview.stories.length > 0) await bulkImportStories(bulkPreview.stories);
+      await loadAll();
+      setShowBulk(false); setBulkFile(null); setBulkPreview(null);
+    } catch(e){setError(e.message);}finally{setSaving(false);}
   };
 
   // Stats
@@ -1721,16 +1869,17 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
   };
 
   const TABS = [
-    ["today", "📅", "Today"],
-    ["calendar", "🗓", "Calendar"],
-    ["reels",    "🎬", "Reels"],
-    ["stories",  "📸", "Stories"],
-    ["series", "🎞", "Series"],
-    ["briefing", "📖", "Briefing"],
+    ["overview",  "🏠", "Overview",  "Home"],
+    ["calendar",  "🗓", "Calendar",  "Plan"],
+    ["reels",     "🎬", "Reels",     "Reels"],
+    ["stories",   "📸", "Stories",   "Stories"],
+    ["series",    "🎞", "Series",    "Series"],
+    ["analytics", "📊", "Analytics", "Stats"],
+    ["briefing",  "📖", "Briefing",  "Brief"],
   ];
 
   return (
-    <div style={{ minHeight:"100dvh", background:BG, fontFamily:"'Georgia',serif", color:TEXT, paddingBottom:m?72:0 }}>
+    <div style={{ minHeight:"100dvh", background:BG, fontFamily:F_BODY, color:TEXT, paddingBottom:m?72:0 }}>
 
       {/* ── Modals ── */}
       {detailReel && (
@@ -1742,6 +1891,7 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
           onSetStatus={handleSetStatus}
           onUpdateDriveLink={handleUpdateDriveLink}
           onUpdateReel={handleUpdateReel}
+          role={role}
           saving={saving}
           analytics={detailAnalytics}
           onSaveAnalytics={handleSaveAnalytics}/>
@@ -1761,13 +1911,13 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
             <div style={{ display:"flex", gap:8 }}>{["franz","tgc"].map(b=><BrandToggle key={b} brand={b} active={newReel.brand===b} onClick={()=>setNewReel(p=>({...p,brand:b}))} compact={m}/>)}</div>
             <div style={{ display:"flex", flexDirection:m?"column":"row", gap:8 }}>
               <div style={{ flex:1 }}><DatePicker value={newReel.date} onChange={v=>setNewReel(p=>({...p,date:v}))} accentColor={bc(newReel.brand)}/></div>
-              <select value={newReel.type} onChange={e=>setNewReel(p=>({...p,type:e.target.value}))} style={{ flex:1, padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:6, color:TEXT, fontSize:14, fontFamily:"monospace", minHeight:44 }}>
+              <select value={newReel.type} onChange={e=>setNewReel(p=>({...p,type:e.target.value}))} style={{ flex:1, padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:6, color:TEXT, fontSize:14, fontFamily:F_MONO, minHeight:44 }}>
                 <option value="REEL">Standalone Reel</option><option value="SERIES">Part of a Series</option>
               </select>
             </div>
             {newReel.type==="SERIES" && (
               <div style={{ display:"flex", flexDirection:m?"column":"row", gap:8 }}>
-                <select value={newReel.series} onChange={e=>setNewReel(p=>({...p,series:e.target.value}))} style={{ flex:1, padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:6, color:TEXT, fontSize:14, fontFamily:"monospace", minHeight:44 }}>
+                <select value={newReel.series} onChange={e=>setNewReel(p=>({...p,series:e.target.value}))} style={{ flex:1, padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:6, color:TEXT, fontSize:14, fontFamily:F_MONO, minHeight:44 }}>
                   <option value="">Select series...</option>
                   {series.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
@@ -1778,8 +1928,18 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
             <Input value={newReel.caption}     onChange={v=>setNewReel(p=>({...p,caption:v}))}     placeholder="Caption"/>
             <Input value={newReel.hook}        onChange={v=>setNewReel(p=>({...p,hook:v}))}        placeholder="Hook — First 2 Seconds"/>
             <textarea value={newReel.description} onChange={e=>setNewReel(p=>({...p,description:e.target.value}))} placeholder="What to film"
-              style={{ padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:6, color:TEXT, fontSize:14, fontFamily:"monospace", minHeight:80, resize:"vertical" }}/>
+              style={{ padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:6, color:TEXT, fontSize:14, fontFamily:F_MONO, minHeight:80, resize:"vertical" }}/>
             <Input value={newReel.format} onChange={v=>setNewReel(p=>({...p,format:v}))} placeholder="Format & Style"/>
+            <div style={{ display:"flex", flexDirection:m?"column":"row", gap:8 }}>
+              <div style={{ flex:1 }}>
+                <input list="assigneeList" value={newReel.assignee} onChange={e=>setNewReel(p=>({...p,assignee:e.target.value}))} placeholder="Owner (Ando / Yugo)"
+                  style={{ width:"100%", boxSizing:"border-box", padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:6, color:TEXT, fontSize:14, minHeight:44 }}/>
+                <datalist id="assigneeList"><option value="Ando"/><option value="Yugo"/></datalist>
+              </div>
+              <Input value={newReel.pillar} onChange={v=>setNewReel(p=>({...p,pillar:v}))} placeholder="Pillar (Process / BTS / USP …)" style={{ flex:1 }}/>
+              <Input value={newReel.est_length} onChange={v=>setNewReel(p=>({...p,est_length:v}))} placeholder="Est. length (e.g. 20s)" style={{ flex:m?1:0.6 }}/>
+            </div>
+            <Input value={newReel.reference_link} onChange={v=>setNewReel(p=>({...p,reference_link:v}))} placeholder="Reference link (optional)"/>
             <Input value={newReel.notes}  onChange={v=>setNewReel(p=>({...p,notes:v}))}  placeholder="Director's Note (optional)"/>
           </div>
         </Modal>
@@ -1800,7 +1960,7 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
       )}
       {editSlot && (
         <Modal title={`${editSlot.slot} Story edit`} onClose={()=>setEditSlot(null)} onSave={handleSaveEditSlot} saving={saving}>
-          <textarea value={editVal} onChange={e=>setEditVal(e.target.value)} style={{ width:"100%", minHeight:120, padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:8, color:TEXT, fontSize:14, fontFamily:"monospace", resize:"vertical", boxSizing:"border-box" }}/>
+          <textarea value={editVal} onChange={e=>setEditVal(e.target.value)} style={{ width:"100%", minHeight:120, padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:8, color:TEXT, fontSize:14, fontFamily:F_MONO, resize:"vertical", boxSizing:"border-box" }}/>
         </Modal>
       )}
       {showPwd && (
@@ -1815,32 +1975,56 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
       )}
 
       {showBulk && (
-        <Modal title="Bulk Import — CSV" onClose={()=>{setShowBulk(false);setBulkFile(null);setBulkPreview(null);}} onSave={bulkFile?handleBulkImport:null} saving={saving} wide>
+        <Modal title="Bulk Import — CSV" onClose={()=>{setShowBulk(false);setBulkFile(null);setBulkPreview(null);}} onSave={(bulkPreview && (bulkPreview.reels.length||bulkPreview.stories.length))?handleBulkImport:null} saving={saving} wide>
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
             <div style={{ padding:"12px 16px", background:`${FRANZ}0F`, border:`1px solid ${FRANZ}33`, borderRadius:10 }}>
-              <div style={{ fontSize:11, color:FRANZ, fontFamily:"monospace", fontWeight:700, marginBottom:6 }}>CSV FORMAT</div>
-              <div style={{ fontSize:12, color:TEXT, fontFamily:"monospace", lineHeight:1.8 }}>Columns: <b>type, brand, date, title, hook, description, format, caption, notes, series, part, morning, midday, evening</b><br/>type = REEL | SERIES | STORY · brand = franz | tgc · date = YYYY-MM-DD</div>
+              <div style={{ fontSize:11, color:FRANZ, fontFamily:F_MONO, fontWeight:700, marginBottom:6 }}>CSV FORMAT</div>
+              <div style={{ fontSize:13, color:TEXT, lineHeight:1.7 }}>Upload the monthly plan as CSV — the Google-Sheet export works directly (columns like <b>Date, Owner, Pillar, Format, Working Title, Concept, Hook, Link, Note, Approved by</b>). Dates like <b>26.08.26</b> are understood. Rows without a brand become <b>franz</b>.</div>
               <button onClick={()=>{
                 const tpl = [
-                  "type,brand,date,title,hook,description,format,caption,notes,series,part,morning,midday,evening",
-                  'REEL,franz,2026-09-01,Morning Light Pour,she opens quietly,"7-shot sequence 12s: door opens, POV walk-in, cinnamon roll close-up, iced matcha pour, wide golden light, end logo",Pure Visual / ASMR,she\'s open. pererenan.,Audio: trending sound,,,,,',
-                  'SERIES,franz,2026-09-02,The Perfect Roll E1,what do they taste like,"18s ASMR pull-apart: tray steam, plate slide, slow tear filling stretch, bite mark, end card",ASMR + Texture,ep 01: the pull.,Audio: original sound,perfect_roll,1,,,',
-                  "STORY,tgc,2026-09-01,,,,,,,,,Morning story text,Midday story text,Evening story text",
+                  "type,brand,date,owner,pillar,format,working title,concept,hook (first 1-2s),link,caption,est. length,notes,series,part,morning,midday,evening",
+                  'REEL,franz,26.09.26,Ando,Process,Voice-over build,Matcha #4 build,"Top-down build of the drink, name it, price it, sell it",Whisk hitting the bowl,,matcha of the week.,20-30s,Audio: trending sound,,,,,',
+                  'SERIES,franz,27.09.26,Yugo,BTS,Series 1/3,Kitchen to Counter — Pt.1,"The midday delivery run, kitchen to store",Trays loaded onto the bike at noon,,fresh twice a day.,15-20s,,delivery,1,,,',
+                  "STORY,franz,26.09.26,,,,,,,,,,,,,Morning story text,Midday story text,Evening story text",
                 ].join("\n");
                 const url = URL.createObjectURL(new Blob([tpl], { type:"text/csv" }));
                 const a = document.createElement("a"); a.href=url; a.download="content_template.csv"; a.click();
                 URL.revokeObjectURL(url);
-              }} style={{ marginTop:10, padding:"7px 14px", borderRadius:6, border:`1px solid ${FRANZ}`, background:CARD, color:FRANZ, fontSize:11, fontFamily:"monospace", fontWeight:700, cursor:"pointer" }}>⬇ Download template</button>
+              }} style={{ marginTop:10, padding:"7px 14px", borderRadius:6, border:`1px solid ${FRANZ}`, background:CARD, color:FRANZ, fontSize:11, fontFamily:F_MONO, fontWeight:700, cursor:"pointer" }}>⬇ Download template</button>
+            </div>
+            <div>
+              <div style={{ ...LBL, marginBottom:8 }}>Import as brand (used for rows without a brand column)</div>
+              <div style={{ display:"flex", gap:8 }}>
+                {["franz","tgc"].map(b=>(
+                  <button key={b} onClick={()=>{ setBulkBrand(b); if(bulkFile){ const rd=new FileReader(); rd.onload=(ev)=>setBulkPreview(normalizeBulkRows(ev.target.result,b)); rd.readAsText(bulkFile); } }}
+                    style={{ padding:"9px 18px", borderRadius:8, border:`1px solid ${bulkBrand===b?bc(b):BORDER}`, background:bulkBrand===b?bc(b):"transparent", color:bulkBrand===b?"#fff":MUTED, fontSize:13, fontWeight:600, cursor:"pointer" }}>
+                    {b==="franz"?"Franz":"TGC"}
+                  </button>
+                ))}
+              </div>
             </div>
             <div style={{ border:`2px dashed ${BORDER}`, borderRadius:10, padding:24, textAlign:"center" }}>
               <input type="file" accept=".csv" onChange={handleBulkFile} style={{ display:"none" }} id="csvInput"/>
-              <label htmlFor="csvInput" style={{ cursor:"pointer", color:FRANZ, fontFamily:"monospace", fontSize:13, fontWeight:700 }}>{bulkFile?`✓ ${bulkFile.name}`:"Select CSV file"}</label>
+              <label htmlFor="csvInput" style={{ cursor:"pointer", color:FRANZ, fontFamily:F_MONO, fontSize:13, fontWeight:700 }}>{bulkFile?`✓ ${bulkFile.name}`:"Select CSV file"}</label>
             </div>
-            {bulkPreview && bulkPreview.map((row,i)=>(
-              <div key={i} style={{ padding:"8px 10px", background:i%2===0?SOFT:CARD, borderRadius:4, fontSize:11, fontFamily:"monospace" }}>
-                <span style={{ color:bc(row.brand||"franz"), fontWeight:700 }}>{row.brand?.toUpperCase()}</span> · {row.date} · <b>{row.title}</b>
+            {bulkPreview && (
+              <div>
+                <div style={{ fontSize:13, fontWeight:700, color:TEXT, marginBottom:8 }}>
+                  Found: {bulkPreview.reels.length} reels · {bulkPreview.stories.length} story days
+                  {bulkPreview.errors.length > 0 && <span style={{ color:RED }}> · {bulkPreview.errors.length} skipped</span>}
+                </div>
+                {bulkPreview.reels.slice(0,6).map((row,i)=>(
+                  <div key={i} style={{ padding:"8px 10px", background:i%2===0?SOFT:CARD, borderRadius:6, fontSize:12, display:"flex", gap:8, alignItems:"center", minWidth:0 }}>
+                    <span style={{ color:bc(row.brand||"franz"), fontWeight:700, flexShrink:0 }}>{(row.brand||"franz").toUpperCase()}</span>
+                    <span style={{ color:MUTED, flexShrink:0 }}>{row.date}</span>
+                    <b style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{row.title}</b>
+                    {row.assignee && <Chip text={row.assignee} color={aColor(row.assignee)} size={10}/>}
+                  </div>
+                ))}
+                {bulkPreview.reels.length > 6 && <div style={{ fontSize:11.5, color:MUTED, marginTop:6 }}>… and {bulkPreview.reels.length-6} more</div>}
+                {bulkPreview.errors.slice(0,4).map((er,i)=>(<div key={i} style={{ fontSize:11.5, color:RED, marginTop:4 }}>{er}</div>))}
               </div>
-            ))}
+            )}
           </div>
         </Modal>
       )}
@@ -1850,30 +2034,30 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
         <div style={{ display:"flex", alignItems:"center", gap:m?8:16 }}>
           {saving && <div style={{ width:6, height:6, borderRadius:"50%", background:FRANZ, animation:"pulse 1s infinite" }}/>}
           <div>
-            <div style={{ fontSize:m?14:18, fontWeight:700, color:TEXT }}>Content Dashboard</div>
-            {!m && <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:"monospace" }}>Franz & The Green Collective</div>}
+            <div style={{ fontSize:m?17:21, fontWeight:600, color:TEXT, fontFamily:F_DISPLAY }}>Content Dashboard</div>
+            {!m && <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:F_MONO }}>Franz & The Green Collective</div>}
           </div>
           {user && (
             <div style={{ display:"flex", alignItems:"center", gap:8, marginLeft:m?0:8 }}>
-              <span style={{ fontSize:m?9:11, color:MUTED, fontFamily:"monospace", maxWidth:m?70:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={(profiles[user.id]?.name)||user.email}>
+              <span style={{ fontSize:m?9:11, color:MUTED, fontFamily:F_MONO, maxWidth:m?70:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={(profiles[user.id]?.name)||user.email}>
                 {role==="admin" ? "★ " : ""}{(profiles[user.id]?.name) || user.email}
               </span>
-              <button onClick={()=>{setShowPwd(true);setPwdMsg(null);}} title="Change password" style={{ padding:"5px 10px", borderRadius:6, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:m?9:10, fontFamily:"monospace", cursor:"pointer" }}>{m?"🔑":"PASSWORT"}</button>
-              <button onClick={()=>signOut()} title="Log out" style={{ padding:"5px 10px", borderRadius:6, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:m?9:10, fontFamily:"monospace", cursor:"pointer" }}>{m?"⎋":"LOGOUT"}</button>
+              <button onClick={()=>{setShowPwd(true);setPwdMsg(null);}} title="Change password" style={{ padding:"5px 10px", borderRadius:6, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:m?9:10, fontFamily:F_MONO, cursor:"pointer" }}>{m?"🔑":"PASSWORD"}</button>
+              <button onClick={()=>signOut()} title="Log out" style={{ padding:"5px 10px", borderRadius:6, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:m?9:10, fontFamily:F_MONO, cursor:"pointer" }}>{m?"⎋":"LOGOUT"}</button>
             </div>
           )}
         </div>
         {!m ? (
           <div style={{ display:"flex", gap:4, alignItems:"center" }}>
             {TABS.map(([id,,label])=>(
-              <button key={id} onClick={()=>setTab(id)} style={{ padding:"7px 15px", borderRadius:6, border:`1px solid ${tab===id?TEXT:BORDER}`, cursor:"pointer", fontSize:11, fontFamily:"monospace", letterSpacing:"1px", background:tab===id?TEXT:"transparent", color:tab===id?BG:MUTED, transition:"all 0.15s" }}>{label.toUpperCase()}</button>
+              <button key={id} onClick={()=>setTab(id)} style={{ padding:"8px 15px", borderRadius:8, border:`1px solid ${tab===id?TEXT:BORDER}`, cursor:"pointer", fontSize:12.5, fontFamily:F_BODY, fontWeight:600, background:tab===id?TEXT:"transparent", color:tab===id?BG:MUTED, transition:"all 0.15s" }}>{label}</button>
             ))}
-            <button onClick={()=>setShowBulk(true)} style={{ padding:"7px 14px", borderRadius:6, border:`1px solid ${BUILD}`, background:`${BUILD}11`, color:BUILD, fontSize:11, fontFamily:"monospace", cursor:"pointer", marginLeft:8 }}>⬆ BULK</button>
+            <button onClick={()=>setShowBulk(true)} style={{ padding:"7px 14px", borderRadius:6, border:`1px solid ${BUILD}`, background:`${BUILD}11`, color:BUILD, fontSize:11, fontFamily:F_MONO, cursor:"pointer", marginLeft:8 }}>⬆ BULK</button>
           </div>
         ):(
           <div style={{ display:"flex", gap:6 }}>
-            <button onClick={()=>setShowAddReel(true)} style={{ padding:"7px 12px", borderRadius:8, border:`1px solid ${FRANZ}`, background:`${FRANZ}11`, color:FRANZ, fontSize:11, fontFamily:"monospace", cursor:"pointer" }}>+ Reel</button>
-            <button onClick={()=>setShowAddStory(true)} style={{ padding:"7px 12px", borderRadius:8, border:`1px solid ${TGC}`, background:`${TGC}11`, color:TGC, fontSize:11, fontFamily:"monospace", cursor:"pointer" }}>+ Story</button>
+            <button onClick={()=>setShowAddReel(true)} style={{ padding:"7px 12px", borderRadius:8, border:`1px solid ${FRANZ}`, background:`${FRANZ}11`, color:FRANZ, fontSize:11, fontFamily:F_MONO, cursor:"pointer" }}>+ Reel</button>
+            <button onClick={()=>setShowAddStory(true)} style={{ padding:"7px 12px", borderRadius:8, border:`1px solid ${TGC}`, background:`${TGC}11`, color:TGC, fontSize:11, fontFamily:F_MONO, cursor:"pointer" }}>+ Story</button>
           </div>
         )}
       </div>
@@ -1884,13 +2068,14 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
         {loading ? <Spinner/> : (
           <>
             {/* HEUTE */}
-            {tab==="today" && (
-              <TodayTab reels={reels} stories={stories} series={series}
-                onToggleStatus={handleToggleStatus}
-                onOpenReel={(reel,brand)=>setDetailReel({reel,brand})}
-                onEditStorySlot={(id, slot, value)=>{ setEditSlot({id,slot}); setEditVal(value); }}
-                onToggleStorySlot={handleToggleStory}
-                saving={saving}/>
+            {tab==="overview" && (
+              <Overview reels={reels} stories={stories} m={m}
+                onOpenReel={(reel,brand)=>setDetailReel({reel,brand})}/>
+            )}
+
+            {tab==="analytics" && (
+              <AnalyticsPage reels={reels} anMap={anMap} loading={anLoading} m={m}
+                onOpenReel={(reel,brand)=>setDetailReel({reel,brand})}/>
             )}
 
             {/* KALENDER */}
@@ -1906,15 +2091,15 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
                     { label:"TGC ✓",     val:reels.filter(r=>r.brand==="tgc"&&r.status==="posted").length,   total:reels.filter(r=>r.brand==="tgc").length,   color:TGC   },
                   ].map((s,i)=>(
                     <div key={i} style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:10, padding:m?10:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-                      <div style={{ fontSize:9, color:MUTED, letterSpacing:"1.5px", textTransform:"uppercase", fontFamily:"monospace", marginBottom:5 }}>{s.label}</div>
+                      <div style={{ fontSize:9, color:MUTED, letterSpacing:"1.5px", textTransform:"uppercase", fontFamily:F_MONO, marginBottom:5 }}>{s.label}</div>
                       <div style={{ fontSize:m?22:32, fontWeight:700, color:s.color, lineHeight:1 }}>{s.val}{s.total!==undefined&&<span style={{ fontSize:m?11:14, color:MUTED }}>/{s.total}</span>}</div>
                     </div>
                   ))}
                 </div>
                 <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14, padding:m?12:24, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", marginBottom:m?12:16 }}>
                   {!m && <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:8, gap:8 }}>
-                    <button onClick={()=>setShowAddReel(true)} style={{ padding:"8px 16px", borderRadius:8, border:`1px solid ${FRANZ}`, background:`${FRANZ}11`, color:FRANZ, fontSize:11, fontFamily:"monospace", cursor:"pointer" }}>+ REEL</button>
-                    <button onClick={()=>setShowAddStory(true)} style={{ padding:"8px 16px", borderRadius:8, border:`1px solid ${TGC}`, background:`${TGC}11`, color:TGC, fontSize:11, fontFamily:"monospace", cursor:"pointer" }}>+ STORY</button>
+                    <button onClick={()=>setShowAddReel(true)} style={{ padding:"8px 16px", borderRadius:8, border:`1px solid ${FRANZ}`, background:`${FRANZ}11`, color:FRANZ, fontSize:11, fontFamily:F_MONO, cursor:"pointer" }}>+ REEL</button>
+                    <button onClick={()=>setShowAddStory(true)} style={{ padding:"8px 16px", borderRadius:8, border:`1px solid ${TGC}`, background:`${TGC}11`, color:TGC, fontSize:11, fontFamily:F_MONO, cursor:"pointer" }}>+ STORY</button>
                   </div>}
                   <CalendarGrid reels={reels} stories={stories} onDayClick={(day,year,month)=>setCalendarDay({day,year,month})}/>
                 </div>
@@ -1929,7 +2114,7 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
                     <BrandToggle brand="franz" active={brand==="franz"} onClick={()=>setBrand("franz")} compact={m}/>
                     <BrandToggle brand="tgc"   active={brand==="tgc"}   onClick={()=>setBrand("tgc")}   compact={m}/>
                   </div>
-                  {!m && <button onClick={()=>setShowAddReel(true)} style={{ padding:"9px 18px", borderRadius:8, border:`1px solid ${bc(brand)}`, background:`${bc(brand)}11`, color:bc(brand), fontSize:12, fontFamily:"monospace", letterSpacing:"1px", cursor:"pointer", whiteSpace:"nowrap" }}>+ REEL</button>}
+                  {!m && <button onClick={()=>setShowAddReel(true)} style={{ padding:"9px 18px", borderRadius:8, border:`1px solid ${bc(brand)}`, background:`${bc(brand)}11`, color:bc(brand), fontSize:12, fontFamily:F_MONO, letterSpacing:"1px", cursor:"pointer", whiteSpace:"nowrap" }}>+ REEL</button>}
                 </div>
                 <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
                   {reels.filter(r=>r.brand===brand).map(reel=>{
@@ -1942,14 +2127,20 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
                         <div style={{ display:"flex", alignItems:"flex-start", gap:8 }}>
                           <div style={{ flexShrink:0, minWidth:42 }}>
                             <div style={{ fontSize:11, fontWeight:700, color:TEXT }}>{formatDate(reel.date)}</div>
-                            <div style={{ fontSize:9, color:MUTED, fontFamily:"monospace" }}>{new Date(reel.date+"T00:00:00").toLocaleDateString("en-GB",{weekday:"short"}).toUpperCase()}</div>
+                            <div style={{ fontSize:9, color:MUTED, fontFamily:F_MONO }}>{new Date(reel.date+"T00:00:00").toLocaleDateString("en-GB",{weekday:"short"}).toUpperCase()}</div>
                           </div>
                           <div style={{ flex:1, minWidth:0 }}>
-                            <div style={{ padding:"2px 7px", borderRadius:4, background:`${tc}15`, border:`1px solid ${tc}44`, fontSize:8, fontFamily:"monospace", color:tc, display:"inline-block", marginBottom:4, whiteSpace:"nowrap" }}>
+                            <div style={{ padding:"2px 7px", borderRadius:4, background:`${tc}15`, border:`1px solid ${tc}44`, fontSize:8, fontFamily:F_MONO, color:tc, display:"inline-block", marginBottom:4, whiteSpace:"nowrap" }}>
                               {reel.type==="SERIES"?`${sObj?.name||reel.series_id} · Pt ${reel.part}`:"STANDALONE"}
                             </div>
-                            <div style={{ fontSize:m?13:14, fontWeight:600, color:TEXT, marginBottom:2 }}>{reel.title}</div>
-                            {reel.hook && <div style={{ fontSize:11, color:MUTED, fontFamily:"monospace", fontStyle:"italic", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>"{reel.hook}"</div>}
+                            <div style={{ fontSize:m?14:15, fontWeight:700, color:TEXT, marginBottom:2 }}>{reel.title}</div>
+                            {reel.hook && <div style={{ fontSize:12, color:MUTED, fontStyle:"italic", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>"{reel.hook}"</div>}
+                            <div style={{ display:"flex", gap:5, marginTop:6, flexWrap:"wrap" }}>
+                              {reel.assignee && <Chip text={reel.assignee} color={aColor(reel.assignee)} size={10.5}/>}
+                              {reel.pillar && <Chip text={reel.pillar} size={10.5}/>}
+                              {reel.est_length && <Chip text={reel.est_length} size={10.5}/>}
+                              <Chip text={reel.approved ? "✓ Approved" : "Pending"} color={reel.approved ? GREEN : AMBER} size={10.5}/>
+                            </div>
                           </div>
                           <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0, alignItems:"flex-end" }} onClick={e=>e.stopPropagation()}>
                             <StatusBadge status={reel.status} onClick={()=>handleToggleStatus(reel.id,reel.status)} disabled={saving}/>
@@ -1959,7 +2150,7 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
                       </div>
                     );
                   })}
-                  {reels.filter(r=>r.brand===brand).length===0&&<div style={{ textAlign:"center", padding:60, color:MUTED, fontFamily:"monospace" }}>No reels yet.</div>}
+                  {reels.filter(r=>r.brand===brand).length===0&&<div style={{ textAlign:"center", padding:60, color:MUTED, fontFamily:F_MONO }}>No reels yet.</div>}
                 </div>
               </div>
             )}
@@ -1972,7 +2163,7 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
                     <BrandToggle brand="franz" active={brand==="franz"} onClick={()=>setBrand("franz")} compact={m}/>
                     <BrandToggle brand="tgc"   active={brand==="tgc"}   onClick={()=>setBrand("tgc")}   compact={m}/>
                   </div>
-                  {!m && <button onClick={()=>setShowAddStory(true)} style={{ padding:"9px 18px", borderRadius:8, border:`1px solid ${bc(brand)}`, background:`${bc(brand)}11`, color:bc(brand), fontSize:12, fontFamily:"monospace", letterSpacing:"1px", cursor:"pointer", whiteSpace:"nowrap" }}>+ STORY DAY</button>}
+                  {!m && <button onClick={()=>setShowAddStory(true)} style={{ padding:"9px 18px", borderRadius:8, border:`1px solid ${bc(brand)}`, background:`${bc(brand)}11`, color:bc(brand), fontSize:12, fontFamily:F_MONO, letterSpacing:"1px", cursor:"pointer", whiteSpace:"nowrap" }}>+ STORY DAY</button>}
                 </div>
                 <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                   {stories.filter(s=>s.brand===brand).map(story=>{
@@ -1986,15 +2177,15 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
                       {key:"slot6",label:"Slot 6",value:story.slot6}];
                     const doneCount=slots.filter(s=>story[`${s.key}_status`]==="posted").length;
                     return (
-                      <div key={story.id} style={{ background:doneCount===3?`${color}08`:CARD, border:`1px solid ${doneCount>0?color+"44":BORDER}`, borderLeft:`4px solid ${doneCount===3?color:doneCount>0?color+"88":BORDER}`, borderRadius:10, padding:"10px 12px" }}>
+                      <div key={story.id} style={{ background:doneCount>0&&doneCount>=countFilledSlots(story)?`${color}08`:CARD, border:`1px solid ${doneCount>0?color+"44":BORDER}`, borderLeft:`4px solid ${doneCount>0&&doneCount>=countFilledSlots(story)?color:doneCount>0?color+"88":BORDER}`, borderRadius:10, padding:"10px 12px" }}>
                         <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
                           <div style={{ flexShrink:0 }}>
                             <div style={{ fontSize:11, fontWeight:700, color:doneCount>0?color:TEXT }}>{formatDate(story.date)}</div>
-                            <div style={{ fontSize:9, color:MUTED, fontFamily:"monospace" }}>{new Date(story.date+"T00:00:00").toLocaleDateString("en-GB",{weekday:"short"}).toUpperCase()}</div>
+                            <div style={{ fontSize:9, color:MUTED, fontFamily:F_MONO }}>{new Date(story.date+"T00:00:00").toLocaleDateString("en-GB",{weekday:"short"}).toUpperCase()}</div>
                           </div>
                           <div style={{ flex:1 }}>
                             <div style={{ display:"flex", gap:3 }}>{slots.map(s=><div key={s.key} style={{ width:8, height:8, borderRadius:"50%", background:story[`${s.key}_status`]==="posted"?color:BORDER }}/>)}</div>
-                            <div style={{ fontSize:10, color:MUTED, fontFamily:"monospace", marginTop:2 }}>{doneCount}/6 posted</div>
+                            <div style={{ fontSize:10, color:MUTED, fontFamily:F_MONO, marginTop:2 }}>{doneCount}/6 posted</div>
                           </div>
                           <button onClick={()=>handleDeleteStory(story.id)} style={{ background:"none", border:"none", color:MUTED, cursor:"pointer", fontSize:11, padding:4 }}>✕</button>
                         </div>
@@ -2008,14 +2199,14 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
                                 onMouseEnter={e=>e.currentTarget.style.borderColor=bc(brand)}
                                 onMouseLeave={e=>e.currentTarget.style.borderColor=done?bc(brand)+"55":BORDER}>
                                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
-                                  <span style={{ fontSize:8, color:done?color:MUTED, fontFamily:"monospace", fontWeight:700 }}>{s.label.toUpperCase()}</span>
+                                  <span style={{ fontSize:8, color:done?color:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{s.label.toUpperCase()}</span>
                                   <div onClick={e=>{e.stopPropagation();handleToggleStory(story.id,s.key,story[`${s.key}_status`]);}}
                                     style={{ width:18, height:18, borderRadius:"50%", background:done?color:"transparent", border:`1.5px solid ${done?color:BORDER}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, color:"#fff", cursor:"pointer" }}>
                                     {done?"✓":""}
                                   </div>
                                 </div>
                                 <div style={{ fontSize:m?10:11, color:TEXT, lineHeight:1.4 }}>{s.value}</div>
-                                <div style={{ marginTop:3, fontSize:8, color:done?color:MUTED, fontFamily:"monospace" }}>{done?"✓ posted":"tap to edit"}</div>
+                                <div style={{ marginTop:3, fontSize:8, color:done?color:MUTED, fontFamily:F_MONO }}>{done?"✓ posted":"tap to edit"}</div>
                               </div>
                             );
                           })}
@@ -2023,7 +2214,7 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
                       </div>
                     );
                   })}
-                  {stories.filter(s=>s.brand===brand).length===0&&<div style={{ textAlign:"center", padding:60, color:MUTED, fontFamily:"monospace" }}>No stories yet.</div>}
+                  {stories.filter(s=>s.brand===brand).length===0&&<div style={{ textAlign:"center", padding:60, color:MUTED, fontFamily:F_MONO }}>No stories yet.</div>}
                 </div>
               </div>
             )}
@@ -2046,10 +2237,10 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
       {/* ── Mobile Bottom Nav ── */}
       {m && (
         <div style={{ position:"fixed", bottom:0, left:0, right:0, background:CARD, borderTop:`1px solid ${BORDER}`, display:"flex", zIndex:60, boxShadow:"0 -4px 20px rgba(0,0,0,0.08)" }}>
-          {TABS.map(([id,icon,label])=>(
+          {TABS.map(([id,icon,label,short])=>(
             <button key={id} onClick={()=>setTab(id)} style={{ flex:1, padding:"12px 4px 18px", background:"transparent", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:4 }}>
               <span style={{ fontSize:22 }}>{icon}</span>
-              <span style={{ fontSize:10, fontFamily:"monospace", color:tab===id?TEXT:MUTED, fontWeight:tab===id?700:400, letterSpacing:"0.5px" }}>{label.toUpperCase()}</span>
+              <span style={{ fontSize:10, fontFamily:F_BODY, color:tab===id?TEXT:MUTED, fontWeight:tab===id?700:500 }}>{short || label}</span>
               {tab===id && <div style={{ width:24, height:2, background:TEXT, borderRadius:1, marginTop:2 }}/>}
             </button>
           ))}
@@ -2081,7 +2272,7 @@ export default function AppGate() {
   }, [session]);
 
   if (session === undefined) {
-    return <div style={{ minHeight:"100vh", background:BG, display:"flex", alignItems:"center", justifyContent:"center", color:MUTED, fontFamily:"monospace" }}>Loading…</div>;
+    return <div style={{ minHeight:"100vh", background:BG, display:"flex", alignItems:"center", justifyContent:"center", color:MUTED, fontFamily:F_MONO }}>Loading…</div>;
   }
   if (!session) return <Auth />;
 
