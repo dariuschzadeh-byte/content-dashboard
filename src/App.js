@@ -22,9 +22,10 @@ import {
 import Auth from "./Auth";
 import Overview from "./Overview";
 import AnalyticsPage from "./AnalyticsPage";
+import ContentPlan from "./ContentPlan";
 import {
   FRANZ, TGC, BUILD, BG, CARD, BORDER, TEXT, MUTED, SOFT, GREEN, AMBER, RED,
-  F_BODY, F_DISPLAY, F_MONO, LBL, Chip, aColor, bc, formatDate, MONTH_NAMES,
+  F_BODY, F_DISPLAY, F_MONO, LBL, Chip, BrandDot, aColor, bc, brandName, formatDate, MONTH_NAMES,
   STATUS_FLOW, STATUS_LABEL, STATUS_COLOR, STATUS_BG,
 } from "./theme";
 
@@ -1624,7 +1625,10 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
   const [error,   setError]   = useState(null);
 
   const [tab,   setTab]   = useState("overview");
-  const [brand, setBrand] = useState("franz");
+  const [brand, setBrand] = useState("all");   // global brand filter: all | franz | tgc
+  // Tabs that create rows need a concrete brand.
+  const wBrand = brand === "all" ? "franz" : brand;
+  const brandReels = brand === "all" ? reels : reels.filter(r => r.brand === brand);
 
   const [showAddReel,  setShowAddReel]  = useState(false);
   const [newReel,      setNewReel]      = useState({ brand:"franz", date:"", title:"", caption:"", hook:"", description:"", format:"", notes:"", type:"REEL", series:"", part:"", assignee:"", pillar:"", est_length:"", reference_link:"" });
@@ -1875,8 +1879,8 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
 
   const TABS = [
     ["overview",  "🏠", "Overview",  "Home"],
-    ["calendar",  "🗓", "Calendar",  "Plan"],
-    ["reels",     "🎬", "Reels",     "Reels"],
+    ["plan",      "🎬", "Content plan", "Plan"],
+    ["calendar",  "🗓", "Calendar",  "Cal"],
     ["stories",   "📸", "Stories",   "Stories"],
     ["series",    "🎞", "Series",    "Series"],
     ["analytics", "📊", "Analytics", "Stats"],
@@ -2042,6 +2046,18 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
             <div style={{ fontSize:m?17:21, fontWeight:600, color:TEXT, fontFamily:F_DISPLAY }}>Content Dashboard</div>
             {!m && <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:F_MONO }}>Franz & The Green Collective</div>}
           </div>
+          {/* Global brand switch — one tool, both brands */}
+          <div style={{ display:"flex", gap:4, marginLeft:m?4:14, background:SOFT, padding:3, borderRadius:99 }}>
+            {[["all","All"],["franz","fr-anz"],["tgc","TGC"]].map(([id,label])=>(
+              <button key={id} onClick={()=>setBrand(id)}
+                style={{ display:"flex", alignItems:"center", gap:5, padding:m?"5px 9px":"6px 13px", borderRadius:99, border:"none", cursor:"pointer",
+                  background: brand===id ? (id==="all"?TEXT:bc(id)) : "transparent",
+                  color: brand===id ? "#fff" : MUTED, fontSize:m?11:12.5, fontWeight:600 }}>
+                {id!=="all" && <span style={{ width:7, height:7, borderRadius:99, background: brand===id ? "#fff" : bc(id) }}/>}
+                {label}
+              </button>
+            ))}
+          </div>
           {user && (
             <div style={{ display:"flex", alignItems:"center", gap:8, marginLeft:m?0:8 }}>
               <span style={{ fontSize:m?9:11, color:MUTED, fontFamily:F_MONO, maxWidth:m?70:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={(profiles[user.id]?.name)||user.email}>
@@ -2074,12 +2090,12 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
           <>
             {/* HEUTE */}
             {tab==="overview" && (
-              <Overview reels={reels} stories={stories} m={m}
+              <Overview reels={brandReels} stories={brand === "all" ? stories : stories.filter(s => s.brand === brand)} m={m}
                 onOpenReel={(reel,brand)=>setDetailReel({reel,brand})}/>
             )}
 
             {tab==="analytics" && (
-              <AnalyticsPage reels={reels} anMap={anMap} loading={anLoading} m={m}
+              <AnalyticsPage reels={brandReels} anMap={anMap} loading={anLoading} m={m}
                 onOpenReel={(reel,brand)=>setDetailReel({reel,brand})}/>
             )}
 
@@ -2112,52 +2128,11 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
             )}
 
             {/* REELS */}
-            {tab==="reels" && (
-              <div>
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14, gap:8 }}>
-                  <div style={{ display:"flex", gap:6, flex:1 }}>
-                    <BrandToggle brand="franz" active={brand==="franz"} onClick={()=>setBrand("franz")} compact={m}/>
-                    <BrandToggle brand="tgc"   active={brand==="tgc"}   onClick={()=>setBrand("tgc")}   compact={m}/>
-                  </div>
-                  {!m && <button onClick={()=>setShowAddReel(true)} style={{ padding:"9px 18px", borderRadius:8, border:`1px solid ${bc(brand)}`, background:`${bc(brand)}11`, color:bc(brand), fontSize:12, fontFamily:F_MONO, letterSpacing:"1px", cursor:"pointer", whiteSpace:"nowrap" }}>+ REEL</button>}
-                </div>
-                <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                  {reels.filter(r=>r.brand===brand).map(reel=>{
-                    const color=bc(brand);
-                    const sObj=reel.type==="SERIES"?series.find(s=>s.id===reel.series_id):null;
-                    const tc=sObj?.color||color;
-                    return (
-                      <div key={reel.id} onClick={()=>setDetailReel({reel,brand})}
-                        style={{ background:reel.status==="posted"?`${color}08`:CARD, border:`1px solid ${reel.status==="posted"?color+"44":BORDER}`, borderLeft:`4px solid ${reel.status==="posted"?color:reel.status==="filmed"?AMBER:BORDER}`, borderRadius:10, padding:m?"10px":"14px 18px", transition:"all 0.15s", cursor:"pointer" }}>
-                        <div style={{ display:"flex", alignItems:"flex-start", gap:8 }}>
-                          <div style={{ flexShrink:0, minWidth:42 }}>
-                            <div style={{ fontSize:11, fontWeight:700, color:TEXT }}>{formatDate(reel.date)}</div>
-                            <div style={{ fontSize:9, color:MUTED, fontFamily:F_MONO }}>{new Date(reel.date+"T00:00:00").toLocaleDateString("en-GB",{weekday:"short"}).toUpperCase()}</div>
-                          </div>
-                          <div style={{ flex:1, minWidth:0 }}>
-                            <div style={{ padding:"2px 7px", borderRadius:4, background:`${tc}15`, border:`1px solid ${tc}44`, fontSize:8, fontFamily:F_MONO, color:tc, display:"inline-block", marginBottom:4, whiteSpace:"nowrap" }}>
-                              {reel.type==="SERIES"?`${sObj?.name||reel.series_id} · Pt ${reel.part}`:"STANDALONE"}
-                            </div>
-                            <div style={{ fontSize:m?14:15, fontWeight:700, color:TEXT, marginBottom:2 }}>{reel.title}</div>
-                            {reel.hook && <div style={{ fontSize:12, color:MUTED, fontStyle:"italic", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>"{reel.hook}"</div>}
-                            <div style={{ display:"flex", gap:5, marginTop:6, flexWrap:"wrap" }}>
-                              {reel.assignee && <Chip text={reel.assignee} color={aColor(reel.assignee)} size={10.5}/>}
-                              {reel.pillar && <Chip text={reel.pillar} size={10.5}/>}
-                              {reel.est_length && <Chip text={reel.est_length} size={10.5}/>}
-                              <Chip text={reel.approved ? "✓ Approved" : "Pending"} color={reel.approved ? GREEN : AMBER} size={10.5}/>
-                            </div>
-                          </div>
-                          <div style={{ display:"flex", flexDirection:"column", gap:4, flexShrink:0, alignItems:"flex-end" }} onClick={e=>e.stopPropagation()}>
-                            <StatusBadge status={reel.status} onClick={()=>handleToggleStatus(reel.id,reel.status)} disabled={saving}/>
-                            <button onClick={()=>handleDeleteReel(reel.id)} disabled={saving} style={{ background:"none", border:"none", color:MUTED, cursor:"pointer", fontSize:11, padding:2 }}>✕</button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {reels.filter(r=>r.brand===brand).length===0&&<div style={{ textAlign:"center", padding:60, color:MUTED, fontFamily:F_MONO }}>No reels yet.</div>}
-                </div>
-              </div>
+            {tab==="plan" && (
+              <ContentPlan reels={reels} brand={brand} role={role} m={m} saving={saving}
+                onSetStatus={handleSetStatus}
+                onOpenReel={(reel,b)=>setDetailReel({reel,brand:b})}
+                onAdd={()=>{ setNewReel(p=>({...p, brand:wBrand})); setShowAddReel(true); }}/>
             )}
 
             {/* STORIES */}
@@ -2165,13 +2140,13 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
               <div>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14, gap:8 }}>
                   <div style={{ display:"flex", gap:6, flex:1 }}>
-                    <BrandToggle brand="franz" active={brand==="franz"} onClick={()=>setBrand("franz")} compact={m}/>
-                    <BrandToggle brand="tgc"   active={brand==="tgc"}   onClick={()=>setBrand("tgc")}   compact={m}/>
+                    <BrandToggle brand="franz" active={wBrand==="franz"} onClick={()=>setBrand("franz")} compact={m}/>
+                    <BrandToggle brand="tgc"   active={wBrand==="tgc"}   onClick={()=>setBrand("tgc")}   compact={m}/>
                   </div>
-                  {!m && <button onClick={()=>setShowAddStory(true)} style={{ padding:"9px 18px", borderRadius:8, border:`1px solid ${bc(brand)}`, background:`${bc(brand)}11`, color:bc(brand), fontSize:12, fontFamily:F_MONO, letterSpacing:"1px", cursor:"pointer", whiteSpace:"nowrap" }}>+ STORY DAY</button>}
+                  {!m && <button onClick={()=>setShowAddStory(true)} style={{ padding:"9px 18px", borderRadius:8, border:`1px solid ${bc(wBrand)}`, background:`${bc(wBrand)}11`, color:bc(wBrand), fontSize:12, fontFamily:F_MONO, letterSpacing:"1px", cursor:"pointer", whiteSpace:"nowrap" }}>+ STORY DAY</button>}
                 </div>
                 <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  {stories.filter(s=>s.brand===brand).map(story=>{
+                  {stories.filter(s=>s.brand===wBrand).map(story=>{
                     const color=bc(brand);
                     const slots=[
                       {key:"slot1",label:"Slot 1",value:story.slot1||story.morning},
@@ -2219,7 +2194,7 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
                       </div>
                     );
                   })}
-                  {stories.filter(s=>s.brand===brand).length===0&&<div style={{ textAlign:"center", padding:60, color:MUTED, fontFamily:F_MONO }}>No stories yet.</div>}
+                  {stories.filter(s=>s.brand===wBrand).length===0&&<div style={{ textAlign:"center", padding:60, color:MUTED, fontFamily:F_MONO }}>No stories yet.</div>}
                 </div>
               </div>
             )}
