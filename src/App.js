@@ -9,11 +9,11 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  fetchSeries, fetchReels, fetchStories,
+  fetchSeries, fetchReels,
   addSeries, deleteSeries,
-  addReel, addStory, deleteReel, deleteStory,
-  updateReelStatus, updateStorySlot, updateStorySlotStatus,
-  saveAnalytics, bulkImportReels, bulkImportStories,
+  addReel, deleteReel,
+  updateReelStatus,
+  saveAnalytics, bulkImportReels,
   updateReelDriveLink, updateReelPostedAt,
   fetchAnalyticsForReel, fetchProfiles, fetchAllAnalytics,
   signOut, getSession, onAuthChange, getMyProfile,
@@ -30,16 +30,73 @@ import {
 } from "./theme";
 
 // ── Drive Folder Links ────────────────────────────────────────
-// Direkter Link zum Brand-Monats-Ordner. Videograf lädt Datei dort hoch.
-// Bei Monatswechsel hier neue URL eintragen.
-const DRIVE_FOLDERS = {
-  franz: "https://drive.google.com/drive/folders/1Em7X6eep15ZCEkUgoEsQxFnqLrSvxXti",
-  tgc:   "https://drive.google.com/drive/folders/12WPLF_MxfwU3eQ5RT3bHFsxyLu4OEF_M",
+// ── Google Drive ──────────────────────────────────────────────
+// "02. Content" is sorted brand first, then month:
+//   01. Raw Footage / <brand> / 2026-09 September
+//   02. Final Reels / <brand> / 2026-09 September
+// The month folders below are pre-created. A reel links straight to the
+// folder for ITS posting month; if a month isn't listed (next year, or a
+// folder nobody created yet) we fall back to the brand folder, which is
+// one click away from the right month.
+const DRIVE_ROOTS = {
+  final: { franz: "1A6WIFIxGS36LZCmrluPL642tzW9mzogA", tgc: "1kU62QVkYCXCO-MKu-J_C3YXl0V6o1rFm" },
+  raw:   { franz: "1KxVwCMqpjhakiAXO5nky2uLqgcWxvjMa", tgc: "1LwSblibySC-DK7iwojUE8EVrtpwOIH5p" },
 };
-const DRIVE_RAW_FOLDERS = {
-  franz: "https://drive.google.com/drive/folders/1MdL1VyEhRXG8izigEM3ehuRVkfplNSlb",
-  tgc:   "https://drive.google.com/drive/folders/1S7uF2wx6Fehwws4BuwGVTLb91SD4h-KL",
+const DRIVE_MONTHS = {
+  final: {
+    franz: {
+      "2026-08": "15rhGl7LweV837Mw5L7RhZ35Pg3UjTOnn",
+      "2026-09": "1Ed84YJHJK6Rb_qGZeAgZ494TRDAexF3b",
+      "2026-10": "1h8VISyTxvRM-9X7xKy4cruFC82FpLDG1",
+      "2026-11": "1NYsHeVqeLUP2A-HTJi9zhqN7_x_55dwV",
+      "2026-12": "1TmXcAlFW5MkpelsU_i_05KRH5Sg9_u6m",
+    },
+    tgc: {
+      "2026-08": "1rIap6UMnNRgm0HylYG_f243vlofItm-W",
+      "2026-09": "1XhTqBABH16085YZr4A9L-3D8ELc9j7lE",
+      "2026-10": "1id7p7kZNJfYtmdZxJbrOXslX7fXQ8bI2",
+      "2026-11": "1b_5-iLIBC6WUJ_yDI4Y4fGWqubQXMXna",
+      "2026-12": "1CwuXwNL4OnGn4XGX7RFuIf1cdS9rWeWE",
+    },
+  },
+  raw: {
+    franz: {
+      "2026-08": "1M6RsIjlqAHGa1GoIs9bObNjUGrqa23rH",
+      "2026-09": "1OIB6Xb2O5KQpyKA2Ew_kYZom_798iIvB",
+      "2026-10": "1HrSsh99D7HQdsRGeZRVVN_ycY3sgTeo8",
+      "2026-11": "1PwM-v0xXRMGSgWW8Vsf6q--fl-D3Repo",
+      "2026-12": "1hlSQ6IJanXcKdHreRYh4ZcUXG4k76jTS",
+    },
+    tgc: {
+      "2026-08": "1Ntjqua9iSNOkC6qUQPSoq-xKyoqavnAd",
+      "2026-09": "1_nbKJ41-ZDzUWR8J4OyFbxhXUhULFLEV",
+      "2026-10": "13msN3KYdXblk_vJJMGRAJsZXspTsZBPB",
+      "2026-11": "12LIhFFDae_kO3OVUjyEr051u2-hg8qB7",
+      "2026-12": "1pnPc23XLe6jgPmQKf1z6Ss-GmtUOnUy6",
+    },
+  },
 };
+
+function driveFolderUrl(kind, brand, dateISO) {
+  const b  = (brand || "").toLowerCase() === "tgc" ? "tgc" : "franz";
+  const id = DRIVE_MONTHS[kind][b][(dateISO || "").slice(0, 7)] || DRIVE_ROOTS[kind][b];
+  return `https://drive.google.com/drive/folders/${id}`;
+}
+
+// The upload name from the Drive guide: 2026-09-03_Ando_matcha-asmr.mp4
+// Date first, so the folder sorts itself into posting order.
+function suggestedFileName(reel) {
+  const slug = String(reel?.title || "reel")
+    .toLowerCase()
+    .replace(/\u00df/g, "ss")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .split("-").filter(Boolean).slice(0, 4).join("-") || "reel";
+  const owner = (reel?.assignee || "").trim();
+  const who   = owner ? owner[0].toUpperCase() + owner.slice(1).toLowerCase() : "Unassigned";
+  return `${reel?.date || "0000-00-00"}_${who}_${slug}.mp4`;
+}
 
 function getDaysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
 function getStartDay(y, m)    { return new Date(y, m, 1).getDay(); }
@@ -135,7 +192,7 @@ const normDate = (raw) => {
 
 function normalizeBulkRows(text, defaultBrand = "franz") {
   const raw = parseCSV(text);
-  if (raw.length < 2) return { reels: [], stories: [], errors: ["No data rows found."] };
+  if (raw.length < 2) return { reels: [], errors: ["No data rows found."] };
   const keyOf = (h) => (h || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const headers = raw[0].map(keyOf);
   const FIELD = (k) => {
@@ -152,21 +209,18 @@ function normalizeBulkRows(text, defaultBrand = "franz") {
     if (k === "approvedby" || k === "approved") return "approvedRaw";
     // "Estimated Lenght" — the sheet's spelling, kept working on purpose.
     if (k.includes("length") || k.includes("lenght")) return "est_length";
-    if (["type","brand","series","part","morning","midday","evening"].includes(k)) return k;
+    if (["type","brand","series","part"].includes(k)) return k;
     return null;
   };
-  const reelsOut = [], storiesOut = [], errors = [];
+  const reelsOut = [], errors = [];
   raw.slice(1).forEach((cells, idx) => {
     const o = {};
     headers.forEach((h, i) => { const f = FIELD(h); if (f && cells[i] != null && cells[i].trim() !== "") o[f] = cells[i].trim(); });
     const line = idx + 2;
     const date = normDate(o.date);
     if (!date) { errors.push(`Row ${line}: missing/invalid date ("${o.date || ""}").`); return; }
-    const isStory = (o.type || "").toUpperCase() === "STORY" || (!o.title && (o.morning || o.midday || o.evening));
-    if (isStory) {
-      storiesOut.push({ brand: o.brand || defaultBrand, date, morning: o.morning || "", midday: o.midday || "", evening: o.evening || "" });
-      return;
-    }
+    // Stories are no longer part of the plan — drop those rows quietly.
+    if ((o.type || "").toUpperCase() === "STORY") return;
     // The sheet often leaves "Working Title" blank and carries the idea in
     // "Concept" — fall back to it instead of dropping the row.
     if (!o.title && o.description) { o.title = o.description.split(/[.\n]/)[0].trim().slice(0, 90); }
@@ -182,20 +236,8 @@ function normalizeBulkRows(text, defaultBrand = "franz") {
       approved: !!apr && !["no","false","0"].includes(apr),
     });
   });
-  return { reels: reelsOut, stories: storiesOut, errors };
+  return { reels: reelsOut, errors };
 }
-
-// Story slots: the UI collects six; older rows only have the legacy three.
-const ALL_SLOT_KEYS    = ["slot1","slot2","slot3","slot4","slot5","slot6"];
-const LEGACY_SLOT_KEYS = ["morning","midday","evening"];
-const countPostedSlots = (s) => Math.max(
-  ALL_SLOT_KEYS.filter(k => s[`${k}_status`] === "posted").length,
-  LEGACY_SLOT_KEYS.filter(k => s[`${k}_status`] === "posted").length,
-);
-const countFilledSlots = (s) => Math.max(1, Math.max(
-  ALL_SLOT_KEYS.filter(k => s[k] && s[k] !== "—").length,
-  LEGACY_SLOT_KEYS.filter(k => s[k] && s[k] !== "—").length,
-));
 
 // Days until date
 const daysUntil = (dateStr) => {
@@ -392,202 +434,6 @@ export function Header({ m, saving, todayLong, who, whoTitle, role, brand, setBr
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════
-// HEUTE TAB
-// ══════════════════════════════════════════════════════════════
-function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, onEditStorySlot, onToggleStorySlot, saving }) {
-  const m = useIsMobile();
-  const todayStr = new Date().toISOString().split("T")[0];
-  const [expanded, setExpanded] = useState(null); // "franz-reel" | "tgc-reel" | "franz-stories" | "tgc-stories" | null
-
-  const franzReels = reels.filter(r => r.date === todayStr && r.brand === "franz");
-  const tgcReels   = reels.filter(r => r.date === todayStr && r.brand === "tgc");
-  const franzStories = stories.filter(s => s.date === todayStr && s.brand === "franz");
-  const tgcStories   = stories.filter(s => s.date === todayStr && s.brand === "tgc");
-
-  // KPIs per brand
-  const franzReelsPosted = franzReels.filter(r => r.status === "posted").length;
-  const franzReelsTotal  = franzReels.length;
-  const tgcReelsPosted   = tgcReels.filter(r => r.status === "posted").length;
-  const tgcReelsTotal    = tgcReels.length;
-
-  const STORY_SLOTS = ["slot1","slot2","slot3","slot4","slot5","slot6"];
-  const LEGACY_SLOTS = ["morning","midday","evening"];
-  const countStoriesPosted = (storiesArr) =>
-    storiesArr.reduce((n,s) => {
-      const newSlots = STORY_SLOTS.filter(sl => s[`${sl}_status`] === "posted").length;
-      const legacySlots = LEGACY_SLOTS.filter(sl => s[`${sl}_status`] === "posted").length;
-      return n + Math.max(newSlots, legacySlots);
-    }, 0);
-  const countStoriesTotal = (storiesArr) =>
-    storiesArr.reduce((n,s) => {
-      const newSlots = STORY_SLOTS.filter(sl => s[sl]).length;
-      const legacySlots = LEGACY_SLOTS.filter(sl => s[sl]).length;
-      return n + Math.max(newSlots, legacySlots);
-    }, 0);
-
-  const franzStoriesPosted = countStoriesPosted(franzStories);
-  const franzStoriesTotal  = countStoriesTotal(franzStories) || (franzStories.length * 6);
-  const tgcStoriesPosted   = countStoriesPosted(tgcStories);
-  const tgcStoriesTotal    = countStoriesTotal(tgcStories) || (tgcStories.length * 6);
-
-  const totalPosted = franzReelsPosted + tgcReelsPosted + franzStoriesPosted + tgcStoriesPosted;
-  const totalToPost = franzReelsTotal + tgcReelsTotal + franzStoriesTotal + tgcStoriesTotal;
-  const allDone = totalToPost > 0 && totalPosted === totalToPost;
-
-  // KPI Card component
-  const KpiCard = ({ id, brand, type, label, posted, total, color, hasContent }) => {
-    const isExpanded = expanded === id;
-    const isComplete = total > 0 && posted === total;
-    const hasNothing = total === 0;
-    return (
-      <div style={{ marginBottom:10 }}>
-        <div onClick={() => !hasNothing && setExpanded(isExpanded ? null : id)}
-          style={{ 
-            background: isComplete ? `${color}0F` : CARD, 
-            border:`1px solid ${isComplete ? color+"66" : isExpanded ? color : BORDER}`, 
-            borderLeft:`4px solid ${isComplete ? color : posted > 0 ? color+"AA" : color+"55"}`, 
-            borderRadius:12, 
-            padding:m?"14px 14px":"16px 18px", 
-            cursor: hasNothing ? "default" : "pointer", 
-            transition:"all 0.2s",
-            opacity: hasNothing ? 0.5 : 1,
-            boxShadow: isExpanded ? `0 4px 16px ${color}22` : "0 1px 4px rgba(0,0,0,0.04)"
-          }}>
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10 }}>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontSize:9, color, fontFamily:F_MONO, letterSpacing:"2px", fontWeight:700, marginBottom:3 }}>
-                {brand.toUpperCase()} {type.toUpperCase()}
-              </div>
-              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <div style={{ fontSize:m?20:24, fontWeight:700, color:isComplete ? color : TEXT, lineHeight:1 }}>
-                  {posted}<span style={{ fontSize:m?13:15, color:MUTED, fontWeight:400 }}>/{total}</span>
-                </div>
-                <div style={{ fontSize:11, color:MUTED, fontFamily:F_MONO }}>{type === "reel" ? "reel" : "stories"} posted</div>
-              </div>
-            </div>
-            {!hasNothing && (
-              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                {isComplete && <span style={{ fontSize:18 }}>✓</span>}
-                <span style={{ fontSize:18, color, transform: isExpanded ? "rotate(90deg)" : "none", transition:"transform 0.2s" }}>›</span>
-              </div>
-            )}
-          </div>
-        </div>
-        {isExpanded && (
-          <div style={{ marginTop:6 }}>{renderExpandedContent(id)}</div>
-        )}
-      </div>
-    );
-  };
-
-  const renderExpandedContent = (id) => {
-    if (id === "franz-reel" || id === "tgc-reel") {
-      const reelsToShow = id === "franz-reel" ? franzReels : tgcReels;
-      const color = id === "franz-reel" ? FRANZ : TGC;
-      return reelsToShow.map(reel => {
-        const sObj = reel.type === "SERIES" ? series.find(s => s.id === reel.series_id) : null;
-        return (
-          <div key={reel.id} onClick={() => onOpenReel(reel, reel.brand)}
-            style={{ background:CARD, border:`1px solid ${BORDER}`, borderLeft:`4px solid ${color}`, borderRadius:12, padding:m?14:18, marginBottom:8, cursor:"pointer", boxShadow:"0 1px 4px rgba(0,0,0,0.04)" }}>
-            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, flexWrap:"wrap" }}>
-              {sObj && <div style={{ padding:"3px 10px", borderRadius:4, background:`${sObj.color}11`, border:`1px solid ${sObj.color}33`, fontSize:10, fontFamily:F_MONO, color:sObj.color }}>{sObj.name} · Pt {reel.part}</div>}
-              <div onClick={e => e.stopPropagation()}>
-                <StatusBadge status={reel.status} onClick={() => onToggleStatus(reel.id, reel.status)} disabled={saving}/>
-              </div>
-            </div>
-            <div style={{ fontSize:m?16:18, fontWeight:700, color:TEXT, marginBottom:6 }}>{reel.title}</div>
-            {reel.hook && (
-              <div style={{ padding:"10px 14px", background:`${color}08`, border:`1px solid ${color}22`, borderRadius:8, marginBottom:8 }}>
-                <div style={{ fontSize:9, color, fontFamily:F_MONO, letterSpacing:"1.5px", marginBottom:3 }}>HOOK — FIRST 2 SECONDS</div>
-                <div style={{ fontSize:14, color:TEXT, fontStyle:"italic" }}>"{reel.hook}"</div>
-              </div>
-            )}
-            {reel.caption && <div style={{ fontSize:12, color:MUTED, fontStyle:"italic", marginBottom:8 }}>Caption: "{reel.caption}"</div>}
-            <div style={{ fontSize:9, color:MUTED, fontFamily:F_MONO, letterSpacing:"1px" }}>TAP CARD FOR FULL DETAILS →</div>
-          </div>
-        );
-      });
-    }
-    if (id === "franz-stories" || id === "tgc-stories") {
-      const storiesToShow = id === "franz-stories" ? franzStories : tgcStories;
-      const color = id === "franz-stories" ? FRANZ : TGC;
-      return storiesToShow.map(story => {
-        const slots = [
-          { key:"slot1", label:"Slot 1", value:story.slot1 || story.morning, status:story.slot1_status || story.morning_status },
-          { key:"slot2", label:"Slot 2", value:story.slot2 || story.midday,  status:story.slot2_status || story.midday_status  },
-          { key:"slot3", label:"Slot 3", value:story.slot3 || story.evening, status:story.slot3_status || story.evening_status },
-          { key:"slot4", label:"Slot 4", value:story.slot4, status:story.slot4_status },
-          { key:"slot5", label:"Slot 5", value:story.slot5, status:story.slot5_status },
-          { key:"slot6", label:"Slot 6", value:story.slot6, status:story.slot6_status },
-        ];
-        return (
-          <div key={story.id} style={{ background:CARD, border:`1px solid ${BORDER}`, borderLeft:`4px solid ${color}`, borderRadius:12, padding:m?12:14, marginBottom:8 }}>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
-              {slots.map(slot => {
-                const done = slot.status==="posted";
-                return (
-                  <div key={slot.key}
-                    onClick={() => onEditStorySlot && onEditStorySlot(story.id, slot.key, slot.value)}
-                    style={{ background:done?`${color}0F`:SOFT, border:`1px solid ${done?color+"55":BORDER}`, borderRadius:8, padding:"10px 8px", cursor:"pointer", minHeight:90 }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
-                      <span style={{ fontSize:8, color:done?color:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{slot.label.toUpperCase()}</span>
-                      <div onClick={e => { e.stopPropagation(); onToggleStorySlot && onToggleStorySlot(story.id, slot.key, slot.status); }}
-                        style={{ width:20, height:20, borderRadius:"50%", background:done?color:"transparent", border:`1.5px solid ${done?color:BORDER}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, color:"#fff", cursor:"pointer", flexShrink:0 }}>
-                        {done?"✓":""}
-                      </div>
-                    </div>
-                    <div style={{ fontSize:10, color:TEXT, lineHeight:1.4 }}>{slot.value || "—"}</div>
-                    <div style={{ marginTop:5, fontSize:8, color:done?color:MUTED, fontFamily:F_MONO }}>{done?"✓ posted":"tap to edit"}</div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-      });
-    }
-    return null;
-  };
-
-  return (
-    <div>
-      {/* Header */}
-      <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14, padding:m?14:20, marginBottom:16, boxShadow:"0 1px 4px rgba(0,0,0,0.06)" }}>
-        <div style={{ fontSize:10, color:MUTED, fontFamily:F_MONO, letterSpacing:"2px", marginBottom:4 }}>TODAY</div>
-        <div style={{ fontSize:m?20:26, fontWeight:700, color:TEXT }}>
-          {new Date().toLocaleDateString("en-GB", { weekday:"long", day:"numeric", month:"long" })}
-        </div>
-        {totalToPost > 0 && (
-          <div style={{ marginTop:10, fontSize:13, color:MUTED, fontFamily:F_MONO }}>
-            <span style={{ color:allDone?GREEN:TEXT, fontWeight:700 }}>{totalPosted}</span>/{totalToPost} done
-          </div>
-        )}
-        {allDone && (
-          <div style={{ marginTop:10, padding:"8px 14px", background:`${GREEN}11`, border:`1px solid ${GREEN}33`, borderRadius:8, display:"inline-flex", alignItems:"center", gap:8 }}>
-            <span style={{ fontSize:16 }}>✅</span>
-            <span style={{ fontSize:12, color:GREEN, fontFamily:F_MONO, fontWeight:700 }}>Everything posted today!</span>
-          </div>
-        )}
-        {totalToPost === 0 && (
-          <div style={{ marginTop:10, fontSize:13, color:MUTED, fontFamily:F_MONO }}>No content planned for today.</div>
-        )}
-      </div>
-
-      {/* KPI Cards */}
-      {totalToPost > 0 && (
-        <div>
-          <KpiCard id="franz-reel"     brand="franz" type="reel"    posted={franzReelsPosted}   total={franzReelsTotal}   color={FRANZ} hasContent={franzReelsTotal>0}/>
-          <KpiCard id="tgc-reel"       brand="tgc"   type="reel"    posted={tgcReelsPosted}     total={tgcReelsTotal}     color={TGC}   hasContent={tgcReelsTotal>0}/>
-          <KpiCard id="franz-stories"  brand="franz" type="stories" posted={franzStoriesPosted} total={franzStoriesTotal} color={FRANZ} hasContent={franzStoriesTotal>0}/>
-          <KpiCard id="tgc-stories"    brand="tgc"   type="stories" posted={tgcStoriesPosted}   total={tgcStoriesTotal}   color={TGC}   hasContent={tgcStoriesTotal>0}/>
-        </div>
-      )}
-
     </div>
   );
 }
@@ -961,36 +807,39 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
           )}
         </div>
 
-        {/* File Name — Naming Convention Display */}
-        {reel.file_name && (
-          <div style={{ marginBottom:16, padding:"12px 14px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10 }}>
-            <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:F_MONO, marginBottom:6 }}>FILE NAME (TAP TO COPY)</div>
-            <div onClick={() => {
-              navigator.clipboard.writeText(reel.file_name);
-              window.alert("Copied: " + reel.file_name);
-            }} style={{ fontSize:12, color:TEXT, fontFamily:F_MONO, padding:"8px 10px", background:CARD, border:`1px solid ${BORDER}`, borderRadius:6, cursor:"pointer", wordBreak:"break-all" }}>
-              {reel.file_name} 📋
+        {/* File Name — the convention from the Drive guide, ready to copy */}
+        {(() => {
+          const fileName = reel.file_name || suggestedFileName(reel);
+          return (
+            <div style={{ marginBottom:16, padding:"12px 14px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:10 }}>
+              <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:F_MONO, marginBottom:6 }}>FILE NAME (TAP TO COPY)</div>
+              <div onClick={() => {
+                navigator.clipboard.writeText(fileName);
+                window.alert("Copied: " + fileName);
+              }} style={{ fontSize:12, color:TEXT, fontFamily:F_MONO, padding:"8px 10px", background:CARD, border:`1px solid ${BORDER}`, borderRadius:6, cursor:"pointer", wordBreak:"break-all" }}>
+                {fileName} 📋
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Drive Folder Section */}
         <div style={{ marginBottom:20, padding:m?"14px":"16px 18px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:12 }}>
           <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:F_MONO, marginBottom:10 }}>📁 GOOGLE DRIVE</div>
-          
+
           <div style={{ fontSize:12, color:TEXT, lineHeight:1.5, marginBottom:12 }}>
-            Upload the final reel using the file name above. Click the folder button to open the right Drive folder.
+            Upload the final reel under the file name above. The buttons open this reel's own month folder — {brand?.toLowerCase()==="tgc" ? "The Green Collective" : "fr-anz"} · {reel.date ? `${MONTH_NAMES[Number(reel.date.slice(5,7))-1]} ${reel.date.slice(0,4)}` : "no date set"}.
           </div>
 
           {/* Folder Buttons */}
           <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:12 }}>
-            <a href={DRIVE_FOLDERS[brand?.toLowerCase()] || DRIVE_FOLDERS.franz} target="_blank" rel="noopener noreferrer"
+            <a href={driveFolderUrl("final", brand, reel.date)} target="_blank" rel="noopener noreferrer"
               style={{ display:"inline-block", padding:"10px 16px", background:brand?.toLowerCase()==="tgc"?TGC:FRANZ, color:"#fff", borderRadius:8, textDecoration:"none", fontSize:12, fontFamily:F_MONO, fontWeight:600 }}>
-              📁 OPEN FINAL FOLDER
+              📁 FINAL REELS
             </a>
-            <a href={DRIVE_RAW_FOLDERS[brand?.toLowerCase()] || DRIVE_RAW_FOLDERS.franz} target="_blank" rel="noopener noreferrer"
+            <a href={driveFolderUrl("raw", brand, reel.date)} target="_blank" rel="noopener noreferrer"
               style={{ display:"inline-block", padding:"10px 16px", background:"transparent", border:`1px solid ${BORDER}`, color:MUTED, borderRadius:8, textDecoration:"none", fontSize:12, fontFamily:F_MONO, fontWeight:600 }}>
-              📂 RAW FOLDER
+              📂 RAW FOOTAGE
             </a>
           </div>
 
@@ -1061,7 +910,7 @@ function ReelDetail({ reel, brand, series, onClose, onToggleStatus, onSetStatus,
 // ══════════════════════════════════════════════════════════════
 // CALENDAR GRID
 // ══════════════════════════════════════════════════════════════
-function CalendarGrid({ reels, stories, onDayClick }) {
+export function CalendarGrid({ reels, onDayClick }) {
   const m = useIsMobile(), now = new Date();
   const [vY, setVY] = useState(now.getFullYear()), [vM, setVM] = useState(now.getMonth());
   const [viewMode, setViewMode] = useState("week"); // "week" or "month"
@@ -1096,15 +945,11 @@ function CalendarGrid({ reels, stories, onDayClick }) {
     const dStr = typeof date === "string" ? date : formatDateStr(date);
     const fR = reels.filter(r => r.brand==="franz" && r.date===dStr);
     const tR = reels.filter(r => r.brand==="tgc"   && r.date===dStr);
-    const fS = stories.filter(s => s.brand==="franz" && s.date===dStr);
-    const tS = stories.filter(s => s.brand==="tgc"   && s.date===dStr);
     const fRd = fR.some(r => r.status==="posted");
     const tRd = tR.some(r => r.status==="posted");
     const fRf = fR.some(r => r.status==="filmed");
     const tRf = tR.some(r => r.status==="filmed");
-    const fSd = fS.reduce((n,s) => n+countPostedSlots(s), 0);
-    const tSd = tS.reduce((n,s) => n+countPostedSlots(s), 0);
-    return { fR, tR, fS, tS, fRd, tRd, fRf, tRf, fSd, tSd };
+    return { fR, tR, fRd, tRd, fRf, tRf };
   };
 
   return (
@@ -1135,8 +980,6 @@ function CalendarGrid({ reels, stories, onDayClick }) {
               const isToday = formatDateStr(now) === dStr;
               const dayName = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()];
               const totalReels = data.fR.length + data.tR.length;
-              const totalStoriesPosted = data.fSd + data.tSd;
-              const totalStoriesPlanned = [...data.fS, ...data.tS].reduce((n,s)=>n+countFilledSlots(s), 0);
 
               return (
                 <div key={dStr} onClick={() => onDayClick(d.getDate(), d.getFullYear(), d.getMonth())}
@@ -1144,7 +987,7 @@ function CalendarGrid({ reels, stories, onDayClick }) {
                   onMouseEnter={e => e.currentTarget.style.borderColor="#999"}
                   onMouseLeave={e => e.currentTarget.style.borderColor=isToday?FRANZ:BORDER}>
                   {/* Day Header */}
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:totalReels>0||totalStoriesPlanned>0?10:0 }}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:totalReels>0?10:0 }}>
                     <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                       <div style={{ width:m?40:48, textAlign:"center" }}>
                         <div style={{ fontSize:9, color:isToday?FRANZ:MUTED, fontFamily:F_MONO, fontWeight:700, marginBottom:2 }}>{dayName.toUpperCase()}</div>
@@ -1152,13 +995,13 @@ function CalendarGrid({ reels, stories, onDayClick }) {
                       </div>
                       {isToday && <div style={{ padding:"3px 8px", borderRadius:4, background:FRANZ, fontSize:9, color:"#fff", fontFamily:F_MONO, fontWeight:700, letterSpacing:"1px" }}>TODAY</div>}
                     </div>
-                    {totalReels===0 && totalStoriesPlanned===0 && (
+                    {totalReels===0 && (
                       <span style={{ fontSize:10, color:MUTED, fontFamily:F_MONO, fontStyle:"italic" }}>No content planned</span>
                     )}
                   </div>
 
                   {/* Franz Row */}
-                  {(data.fR.length>0 || data.fS.length>0) && (
+                  {data.fR.length>0 && (
                     <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", background:`${FRANZ}0A`, border:`1px solid ${FRANZ}33`, borderRadius:8, marginBottom:6 }}>
                       <div style={{ fontSize:9, color:FRANZ, fontFamily:F_MONO, fontWeight:700, width:m?42:50, flexShrink:0 }}>FRANZ</div>
                       {data.fR.length>0 ? (
@@ -1168,19 +1011,11 @@ function CalendarGrid({ reels, stories, onDayClick }) {
                           <span style={{ fontSize:9, color:data.fRd?FRANZ:MUTED, fontFamily:F_MONO, fontWeight:700, flexShrink:0 }}>{data.fRd?"✓":data.fRf?"FILMED":"PLANNED"}</span>
                         </div>
                       ) : <div style={{ flex:1, fontSize:10, color:MUTED, fontStyle:"italic" }}>No reel</div>}
-                      {data.fS.length>0 && (
-                        <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
-                          <span style={{ fontSize:10, color:data.fSd>0?FRANZ:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{data.fSd}/3</span>
-                          <div style={{ display:"flex", gap:2 }}>
-                            {[0,1,2].map(i => <div key={i} style={{ width:5, height:5, borderRadius:"50%", background:i<data.fSd?FRANZ:`${FRANZ}33` }}/>)}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   )}
 
                   {/* TGC Row */}
-                  {(data.tR.length>0 || data.tS.length>0) && (
+                  {data.tR.length>0 && (
                     <div style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", background:`${TGC}0A`, border:`1px solid ${TGC}33`, borderRadius:8 }}>
                       <div style={{ fontSize:9, color:TGC, fontFamily:F_MONO, fontWeight:700, width:m?42:50, flexShrink:0 }}>TGC</div>
                       {data.tR.length>0 ? (
@@ -1190,14 +1025,6 @@ function CalendarGrid({ reels, stories, onDayClick }) {
                           <span style={{ fontSize:9, color:data.tRd?TGC:MUTED, fontFamily:F_MONO, fontWeight:700, flexShrink:0 }}>{data.tRd?"✓":data.tRf?"FILMED":"PLANNED"}</span>
                         </div>
                       ) : <div style={{ flex:1, fontSize:10, color:MUTED, fontStyle:"italic" }}>No reel</div>}
-                      {data.tS.length>0 && (
-                        <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
-                          <span style={{ fontSize:10, color:data.tSd>0?TGC:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{data.tSd}/3</span>
-                          <div style={{ display:"flex", gap:2 }}>
-                            {[0,1,2].map(i => <div key={i} style={{ width:5, height:5, borderRadius:"50%", background:i<data.tSd?TGC:`${TGC}33` }}/>)}
-                          </div>
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
@@ -1234,20 +1061,18 @@ function CalendarGrid({ reels, stories, onDayClick }) {
                 <div key={day} onClick={() => onDayClick(day, vY, vM)}
                   style={{ minHeight:m?60:78, borderRadius:m?6:8, padding:m?"4px":"6px 7px", background:isT?`${FRANZ}11`:CARD, border:`1px solid ${isT?FRANZ:BORDER}`, cursor:"pointer", transition:"all 0.15s" }}>
                   <div style={{ fontSize:m?11:12, fontWeight:isT?700:500, color:isT?FRANZ:TEXT, marginBottom:m?3:4, fontFamily:F_MONO }}>{day}</div>
-                  {(data.fR.length>0 || data.fS.length>0) && (
+                  {data.fR.length>0 && (
                     <div style={{ display:"flex", alignItems:"center", gap:3, marginBottom:m?3:4, padding:m?"2px 4px":"3px 5px", background:`${FRANZ}15`, borderRadius:m?4:6, border:`1px solid ${data.fRd?FRANZ:FRANZ+"44"}` }}>
                       {data.fR.length>0 && <div style={{ width:m?6:7, height:m?6:7, borderRadius:"50%", background:fDot, flexShrink:0 }}/>}
                       {!m && data.fR[0] && <div style={{ fontSize:9, color:data.fRd?FRANZ:MUTED, fontFamily:F_MONO, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>F · {data.fR[0]?.title.slice(0,12)}</div>}
                       {m && data.fR.length>0 && <span style={{ fontSize:7, color:data.fRd?FRANZ:MUTED, fontFamily:F_MONO, fontWeight:700 }}>F</span>}
-                      {data.fS.length>0 && <span style={{ fontSize:m?7:8, color:data.fSd>0?FRANZ:MUTED, fontFamily:F_MONO, fontWeight:700, marginLeft:"auto" }}>{data.fSd}/3</span>}
                     </div>
                   )}
-                  {(data.tR.length>0 || data.tS.length>0) && (
+                  {data.tR.length>0 && (
                     <div style={{ display:"flex", alignItems:"center", gap:3, marginBottom:m?2:3, padding:m?"2px 4px":"3px 5px", background:`${TGC}15`, borderRadius:m?4:6, border:`1px solid ${data.tRd?TGC:TGC+"44"}` }}>
                       {data.tR.length>0 && <div style={{ width:m?6:7, height:m?6:7, borderRadius:"50%", background:tDot, flexShrink:0 }}/>}
                       {!m && data.tR[0] && <div style={{ fontSize:9, color:data.tRd?TGC:MUTED, fontFamily:F_MONO, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", flex:1 }}>T · {data.tR[0]?.title.slice(0,12)}</div>}
                       {m && data.tR.length>0 && <span style={{ fontSize:7, color:data.tRd?TGC:MUTED, fontFamily:F_MONO, fontWeight:700 }}>T</span>}
-                      {data.tS.length>0 && <span style={{ fontSize:m?7:8, color:data.tSd>0?TGC:MUTED, fontFamily:F_MONO, fontWeight:700, marginLeft:"auto" }}>{data.tSd}/3</span>}
                     </div>
                   )}
                 </div>
@@ -1272,14 +1097,12 @@ function CalendarGrid({ reels, stories, onDayClick }) {
 // ══════════════════════════════════════════════════════════════
 // DAY MODAL
 // ══════════════════════════════════════════════════════════════
-function DayModal({ day, year, month, reels, stories, series, onClose, onOpenReel, onToggleReel, onToggleStory, saving }) {
+export function DayModal({ day, year, month, reels, series, onClose, onOpenReel, onToggleReel, saving }) {
   const m   = useIsMobile();
   useSwipeBack(onClose);
   const ds  = `${year}-${String(month+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
   const fR  = reels.filter(r => r.brand==="franz" && r.date===ds);
   const tR  = reels.filter(r => r.brand==="tgc"   && r.date===ds);
-  const fS  = stories.filter(s => s.brand==="franz" && s.date===ds);
-  const tS  = stories.filter(s => s.brand==="tgc"   && s.date===ds);
 
   const RR = ({ reel, brand }) => {
     const color = bc(brand);
@@ -1333,100 +1156,7 @@ function DayModal({ day, year, month, reels, stories, series, onClose, onOpenRee
           </div>
         )}
 
-        {/* ═══ STORIES SECTION ═══ */}
-        {(fS.length > 0 || tS.length > 0) && (
-          <div style={{ marginBottom:14 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12 }}>
-              <div style={{ height:2, flex:1, background:BORDER }}/>
-              <div style={{ fontSize:11, color:MUTED, fontFamily:F_MONO, letterSpacing:"3px", fontWeight:700 }}>STORIES</div>
-              <div style={{ height:2, flex:1, background:BORDER }}/>
-            </div>
-
-            {/* FRANZ Stories */}
-            {fS.map(story => {
-              const slots = [
-                { key:"slot1", label:"Slot 1", value:story.slot1 || story.morning, status:story.slot1_status || story.morning_status },
-                { key:"slot2", label:"Slot 2", value:story.slot2 || story.midday,  status:story.slot2_status || story.midday_status  },
-                { key:"slot3", label:"Slot 3", value:story.slot3 || story.evening, status:story.slot3_status || story.evening_status },
-                { key:"slot4", label:"Slot 4", value:story.slot4, status:story.slot4_status },
-                { key:"slot5", label:"Slot 5", value:story.slot5, status:story.slot5_status },
-                { key:"slot6", label:"Slot 6", value:story.slot6, status:story.slot6_status },
-              ];
-              const doneCount = slots.filter(s => s.status === "posted").length;
-              return (
-                <div key={story.id} style={{ background:doneCount>0&&doneCount>=countFilledSlots(story)?`${FRANZ}08`:CARD, border:`1px solid ${doneCount>0?FRANZ+"44":BORDER}`, borderLeft:`4px solid ${doneCount>0&&doneCount>=countFilledSlots(story)?FRANZ:doneCount>0?FRANZ+"88":BORDER}`, borderRadius:10, padding:12, marginBottom:10 }}>
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
-                    <div style={{ fontSize:11, color:FRANZ, fontFamily:F_MONO, fontWeight:700 }}>FRANZ STORIES</div>
-                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                      <div style={{ display:"flex", gap:3 }}>
-                        {slots.map(s => <div key={s.key} style={{ width:7, height:7, borderRadius:"50%", background:s.status==="posted"?FRANZ:BORDER }}/>)}
-                      </div>
-                      <span style={{ fontSize:10, color:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{doneCount}/{Math.max(countFilledSlots(story), doneCount)}</span>
-                    </div>
-                  </div>
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
-                    {slots.map(slot => {
-                      const done = slot.status==="posted";
-                      return (
-                        <div key={slot.key} style={{ background:done?`${FRANZ}0F`:SOFT, border:`1px solid ${done?FRANZ+"55":BORDER}`, borderRadius:8, padding:"8px 7px", minHeight:80 }}>
-                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
-                            <span style={{ fontSize:8, color:done?FRANZ:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{slot.label.toUpperCase()}</span>
-                            <div onClick={() => onToggleStory && onToggleStory(story.id, slot.key, slot.status)}
-                              style={{ width:18, height:18, borderRadius:"50%", background:done?FRANZ:"transparent", border:`1.5px solid ${done?FRANZ:BORDER}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, color:"#fff", cursor:"pointer", flexShrink:0 }}>{done?"✓":""}</div>
-                          </div>
-                          <div style={{ fontSize:10, color:TEXT, lineHeight:1.4 }}>{slot.value || "—"}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* TGC Stories */}
-            {tS.map(story => {
-              const slots = [
-                { key:"slot1", label:"Slot 1", value:story.slot1 || story.morning, status:story.slot1_status || story.morning_status },
-                { key:"slot2", label:"Slot 2", value:story.slot2 || story.midday,  status:story.slot2_status || story.midday_status  },
-                { key:"slot3", label:"Slot 3", value:story.slot3 || story.evening, status:story.slot3_status || story.evening_status },
-                { key:"slot4", label:"Slot 4", value:story.slot4, status:story.slot4_status },
-                { key:"slot5", label:"Slot 5", value:story.slot5, status:story.slot5_status },
-                { key:"slot6", label:"Slot 6", value:story.slot6, status:story.slot6_status },
-              ];
-              const doneCount = slots.filter(s => s.status === "posted").length;
-              return (
-                <div key={story.id} style={{ background:doneCount>0&&doneCount>=countFilledSlots(story)?`${TGC}08`:CARD, border:`1px solid ${doneCount>0?TGC+"44":BORDER}`, borderLeft:`4px solid ${doneCount>0&&doneCount>=countFilledSlots(story)?TGC:doneCount>0?TGC+"88":BORDER}`, borderRadius:10, padding:12, marginBottom:10 }}>
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
-                    <div style={{ fontSize:11, color:TGC, fontFamily:F_MONO, fontWeight:700 }}>TGC STORIES</div>
-                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                      <div style={{ display:"flex", gap:3 }}>
-                        {slots.map(s => <div key={s.key} style={{ width:7, height:7, borderRadius:"50%", background:s.status==="posted"?TGC:BORDER }}/>)}
-                      </div>
-                      <span style={{ fontSize:10, color:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{doneCount}/{Math.max(countFilledSlots(story), doneCount)}</span>
-                    </div>
-                  </div>
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
-                    {slots.map(slot => {
-                      const done = slot.status==="posted";
-                      return (
-                        <div key={slot.key} style={{ background:done?`${TGC}0F`:SOFT, border:`1px solid ${done?TGC+"55":BORDER}`, borderRadius:8, padding:"8px 7px", minHeight:80 }}>
-                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:5 }}>
-                            <span style={{ fontSize:8, color:done?TGC:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{slot.label.toUpperCase()}</span>
-                            <div onClick={() => onToggleStory && onToggleStory(story.id, slot.key, slot.status)}
-                              style={{ width:18, height:18, borderRadius:"50%", background:done?TGC:"transparent", border:`1.5px solid ${done?TGC:BORDER}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, color:"#fff", cursor:"pointer", flexShrink:0 }}>{done?"✓":""}</div>
-                          </div>
-                          <div style={{ fontSize:10, color:TEXT, lineHeight:1.4 }}>{slot.value || "—"}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {fR.length===0&&tR.length===0&&fS.length===0&&tS.length===0&&<div style={{ textAlign:"center", padding:40, color:MUTED, fontFamily:F_MONO }}>No content for this day.</div>}
+        {fR.length===0&&tR.length===0&&<div style={{ textAlign:"center", padding:40, color:MUTED, fontFamily:F_MONO }}>No content for this day.</div>}
 
         <div style={{ display:"flex", justifyContent:"flex-end", marginTop:14 }}><Btn onClick={onClose} accent={MUTED}>CLOSE</Btn></div>
       </div>
@@ -1529,9 +1259,8 @@ function BriefingTab() {
         <P bold>Daily output (per brand):</P>
         <ul style={{ marginTop:0, marginBottom:12, paddingLeft:24 }}>
           <Bullet><b>1 Reel per day</b> — planned in advance via this dashboard, with hook + shot list + caption + audio direction</Bullet>
-          <Bullet><b>6 Stories per day</b> — looser, batch-shot from daily footage, follow the slot blueprint</Bullet>
         </ul>
-        <P bold>Total monthly: 62 Reels (31 Franz + 31 TGC) + 372 Stories</P>
+        <P bold>Total monthly: 62 Reels (31 Franz + 31 TGC)</P>
         <P bold>Best posting windows:</P>
         <ul style={{ marginTop:0, paddingLeft:24 }}>
           <Bullet><b>11:00–13:00 Bali time</b> — peak afternoon for AU/EU lunch overlap</Bullet>
@@ -1543,15 +1272,15 @@ function BriefingTab() {
       <Section title="Daily Rhythm — Three Shoot Windows" color={BUILD}>
         <div style={{ marginBottom:12, padding:"12px 14px", background:SOFT, borderRadius:8 }}>
           <div style={{ fontSize:12, color:TEXT, fontWeight:700, marginBottom:4 }}>🌅 Morning Batch — 7–9am</div>
-          <P>Opening shots, bakery prep, fresh roll trays, espresso machine warm-up, morning light through rice field windows. Cover stories slot 1–2 and any morning-light reel.</P>
+          <P>Opening shots, bakery prep, fresh roll trays, espresso machine warm-up, morning light through rice field windows. Best window for any morning-light reel.</P>
         </div>
         <div style={{ marginBottom:12, padding:"12px 14px", background:SOFT, borderRadius:8 }}>
           <div style={{ fontSize:12, color:TEXT, fontWeight:700, marginBottom:4 }}>☀️ Midday Batch — 11:30am–12:30pm</div>
-          <P>Drink hero shots, cinnamon roll pulls, fridge restocks, customer hand moments. Cover the day's main reel and stories slot 3–4.</P>
+          <P>Drink hero shots, cinnamon roll pulls, fridge restocks, customer hand moments. This is where the day's main reel usually comes from.</P>
         </div>
         <div style={{ padding:"12px 14px", background:SOFT, borderRadius:8 }}>
           <div style={{ fontSize:12, color:TEXT, fontWeight:700, marginBottom:4 }}>🌇 Golden Hour Batch — 5–7pm</div>
-          <P>Atmosphere, rice fields, bench oasis, customer back-of-head moments, sunset reels. Cover stories slot 5–6 and any golden-hour reel.</P>
+          <P>Atmosphere, rice fields, bench oasis, customer back-of-head moments, sunset reels. Best window for any golden-hour reel.</P>
         </div>
       </Section>
 
@@ -1720,7 +1449,6 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
   const m = useIsMobile();
 
   const [reels,   setReels]   = useState([]);
-  const [stories, setStories] = useState([]);
   const [series,  setSeries]  = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving]  = useState(false);
@@ -1734,10 +1462,6 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
 
   const [showAddReel,  setShowAddReel]  = useState(false);
   const [newReel,      setNewReel]      = useState({ brand:"franz", date:"", title:"", caption:"", hook:"", description:"", format:"", notes:"", type:"REEL", series:"", part:"", assignee:"", pillar:"", est_length:"", reference_link:"" });
-  const [showAddStory, setShowAddStory] = useState(false);
-  const [newStory,     setNewStory]     = useState({ brand:"franz", date:"", slot1:"", slot2:"", slot3:"", slot4:"", slot5:"", slot6:"" });
-  const [editSlot,     setEditSlot]     = useState(null);
-  const [editVal,      setEditVal]      = useState("");
   const [detailReel,   setDetailReel]   = useState(null);
   const [detailAnalytics, setDetailAnalytics] = useState(null);
   const [calendarDay,  setCalendarDay]  = useState(null);
@@ -1776,8 +1500,8 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
   const loadAll = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const [s, r, st] = await Promise.all([fetchSeries(), fetchReels(), fetchStories()]);
-      setSeries(s||[]); setReels(r||[]); setStories(st||[]);
+      const [s, r] = await Promise.all([fetchSeries(), fetchReels()]);
+      setSeries(s||[]); setReels(r||[]);
     } catch (e) { setError("Connection failed: " + e.message); }
     finally { setLoading(false); }
   }, []);
@@ -1841,17 +1565,6 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
     } catch(e){setError(e.message);}finally{setSaving(false);}
   };
 
-  const handleAddStory = async () => {
-    if (!newStory.date) return;
-    setSaving(true); setError(null);
-    try {
-      const created = await addStory(newStory);
-      setStories(prev => [...prev, created].sort((a,b)=>a.date.localeCompare(b.date)));
-      setNewStory({ brand:"franz", date:"", slot1:"", slot2:"", slot3:"", slot4:"", slot5:"", slot6:"" });
-      setShowAddStory(false);
-    } catch(e){setError(e.message);}finally{setSaving(false);}
-  };
-
   const handleDeleteReel = async (id) => {
     setSaving(true);
     try { await deleteReel(id); setReels(prev=>prev.filter(r=>r.id!==id)); }
@@ -1901,35 +1614,6 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
     finally { setSaving(false); }
   };
 
-  const handleToggleStory = async (id, slot, currentStatus) => {
-    // Optimistic update — flip checkbox immediately
-    const newStatus = currentStatus === "posted" ? "planned" : "posted";
-    setStories(prev=>prev.map(s=>s.id===id?{...s,[`${slot}_status`]:newStatus}:s));
-    try {
-      await updateStorySlotStatus(id, slot, currentStatus!=="posted");
-    } catch(e){
-      // Revert on error
-      setStories(prev=>prev.map(s=>s.id===id?{...s,[`${slot}_status`]:currentStatus}:s));
-      setError(e.message);
-    }
-  };
-
-  const handleDeleteStory = async (id) => {
-    setSaving(true);
-    try { await deleteStory(id); setStories(prev=>prev.filter(s=>s.id!==id)); }
-    catch(e){setError(e.message);}finally{setSaving(false);}
-  };
-
-  const handleSaveEditSlot = async () => {
-    if (!editSlot) return;
-    setSaving(true);
-    try {
-      const updated = await updateStorySlot(editSlot.id, editSlot.slot, editVal);
-      setStories(prev=>prev.map(s=>s.id===editSlot.id?{...s,[editSlot.slot]:updated[editSlot.slot]}:s));
-      setEditSlot(null); setEditVal("");
-    } catch(e){setError(e.message);}finally{setSaving(false);}
-  };
-
   const handleSaveAnalytics = async (reelId, vals) => {
     // All fields blank? Don't write a 0-view row — it would count as "tracked"
     // and always win the lowest-views highlight.
@@ -1956,11 +1640,10 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
   };
 
   const handleBulkImport = async () => {
-    if (!bulkPreview || (bulkPreview.reels.length === 0 && bulkPreview.stories.length === 0)) return;
+    if (!bulkPreview || bulkPreview.reels.length === 0) return;
     setSaving(true); setError(null);
     try {
-      if (bulkPreview.reels.length > 0)   await bulkImportReels(bulkPreview.reels);
-      if (bulkPreview.stories.length > 0) await bulkImportStories(bulkPreview.stories);
+      await bulkImportReels(bulkPreview.reels);
       await loadAll();
       setShowBulk(false); setBulkFile(null); setBulkPreview(null);
     } catch(e){setError(e.message);}finally{setSaving(false);}
@@ -2012,11 +1695,10 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
       )}
       {calendarDay && (
         <DayModal day={calendarDay.day} year={calendarDay.year} month={calendarDay.month}
-          reels={reels} stories={stories} series={series}
+          reels={reels} series={series}
           onClose={()=>setCalendarDay(null)}
           onOpenReel={(reel,brand)=>{setCalendarDay(null);setDetailReel({reel,brand});}}
           onToggleReel={handleToggleStatus}
-          onToggleStory={handleToggleStory}
           saving={saving}/>
       )}
       {showAddReel && (
@@ -2058,25 +1740,6 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
           </div>
         </Modal>
       )}
-      {showAddStory && (
-        <Modal title="Add Story Day" onClose={()=>setShowAddStory(false)} onSave={handleAddStory} saving={saving}>
-          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-            <div style={{ display:"flex", gap:8 }}>{["franz","tgc"].map(b=><BrandToggle key={b} brand={b} active={newStory.brand===b} onClick={()=>setNewStory(p=>({...p,brand:b}))} compact={m}/>)}</div>
-            <DatePicker value={newStory.date} onChange={v=>setNewStory(p=>({...p,date:v}))} accentColor={bc(newStory.brand)}/>
-            <Input value={newStory.slot1} onChange={v=>setNewStory(p=>({...p,slot1:v}))} placeholder="Story slot 1"/>
-            <Input value={newStory.slot2} onChange={v=>setNewStory(p=>({...p,slot2:v}))} placeholder="Story slot 2"/>
-            <Input value={newStory.slot3} onChange={v=>setNewStory(p=>({...p,slot3:v}))} placeholder="Story slot 3"/>
-            <Input value={newStory.slot4} onChange={v=>setNewStory(p=>({...p,slot4:v}))} placeholder="Story slot 4"/>
-            <Input value={newStory.slot5} onChange={v=>setNewStory(p=>({...p,slot5:v}))} placeholder="Story slot 5"/>
-            <Input value={newStory.slot6} onChange={v=>setNewStory(p=>({...p,slot6:v}))} placeholder="Story slot 6"/>
-          </div>
-        </Modal>
-      )}
-      {editSlot && (
-        <Modal title={`${editSlot.slot} Story edit`} onClose={()=>setEditSlot(null)} onSave={handleSaveEditSlot} saving={saving}>
-          <textarea value={editVal} onChange={e=>setEditVal(e.target.value)} style={{ width:"100%", minHeight:120, padding:"10px 12px", background:SOFT, border:`1px solid ${BORDER}`, borderRadius:8, color:TEXT, fontSize:14, fontFamily:F_MONO, resize:"vertical", boxSizing:"border-box" }}/>
-        </Modal>
-      )}
       {showPwd && (
         <Modal title="Change password" onClose={()=>{setShowPwd(false);setNewPwd("");setPwdMsg(null);}} onSave={handleChangePassword} saving={saving}>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
@@ -2089,17 +1752,16 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
       )}
 
       {showBulk && (
-        <Modal title="Bulk Import — CSV" onClose={()=>{setShowBulk(false);setBulkFile(null);setBulkPreview(null);}} onSave={(bulkPreview && (bulkPreview.reels.length||bulkPreview.stories.length))?handleBulkImport:null} saving={saving} wide>
+        <Modal title="Bulk Import — CSV" onClose={()=>{setShowBulk(false);setBulkFile(null);setBulkPreview(null);}} onSave={(bulkPreview && bulkPreview.reels.length)?handleBulkImport:null} saving={saving} wide>
           <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
             <div style={{ padding:"12px 16px", background:`${FRANZ}0F`, border:`1px solid ${FRANZ}33`, borderRadius:10 }}>
               <div style={{ fontSize:11, color:FRANZ, fontFamily:F_MONO, fontWeight:700, marginBottom:6 }}>CSV FORMAT</div>
               <div style={{ fontSize:13, color:TEXT, lineHeight:1.7 }}>Upload the monthly plan as CSV — the Google-Sheet export works directly (columns like <b>Date, Owner, Pillar, Format, Working Title, Concept, Hook, Link, Note, Approved by</b>). Dates like <b>26.08.26</b> are understood. Rows without a brand become <b>franz</b>.</div>
               <button onClick={()=>{
                 const tpl = [
-                  "type,brand,date,owner,pillar,format,working title,concept,hook (first 1-2s),link,caption,est. length,notes,series,part,morning,midday,evening",
-                  'REEL,franz,26.09.26,Ando,Process,Voice-over build,Matcha #4 build,"Top-down build of the drink, name it, price it, sell it",Whisk hitting the bowl,,matcha of the week.,20-30s,Audio: trending sound,,,,,',
-                  'SERIES,franz,27.09.26,Yugo,BTS,Series 1/3,Kitchen to Counter — Pt.1,"The midday delivery run, kitchen to store",Trays loaded onto the bike at noon,,fresh twice a day.,15-20s,,delivery,1,,,',
-                  "STORY,franz,26.09.26,,,,,,,,,,,,,Morning story text,Midday story text,Evening story text",
+                  "type,brand,date,owner,pillar,format,working title,concept,hook (first 1-2s),link,caption,est. length,notes,series,part",
+                  'REEL,franz,26.09.26,Ando,Process,Voice-over build,Matcha #4 build,"Top-down build of the drink, name it, price it, sell it",Whisk hitting the bowl,,matcha of the week.,20-30s,Audio: trending sound,,',
+                  'SERIES,franz,27.09.26,Yugo,BTS,Series 1/3,Kitchen to Counter — Pt.1,"The midday delivery run, kitchen to store",Trays loaded onto the bike at noon,,fresh twice a day.,15-20s,,delivery,1',
                 ].join("\n");
                 const url = URL.createObjectURL(new Blob([tpl], { type:"text/csv" }));
                 const a = document.createElement("a"); a.href=url; a.download="content_template.csv"; a.click();
@@ -2124,7 +1786,7 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
             {bulkPreview && (
               <div>
                 <div style={{ fontSize:13, fontWeight:700, color:TEXT, marginBottom:8 }}>
-                  Found: {bulkPreview.reels.length} reels · {bulkPreview.stories.length} story days
+                  Found: {bulkPreview.reels.length} reels
                   {bulkPreview.errors.length > 0 && <span style={{ color:RED }}> · {bulkPreview.errors.length} skipped</span>}
                 </div>
                 {bulkPreview.reels.slice(0,6).map((row,i)=>(
@@ -2184,11 +1846,10 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
                   ))}
                 </div>
                 <div style={{ background:CARD, border:`1px solid ${BORDER}`, borderRadius:14, padding:m?12:24, boxShadow:"0 1px 4px rgba(0,0,0,0.06)", marginBottom:m?12:16 }}>
-                  {!m && <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:8, gap:8 }}>
+                  {!m && <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:8 }}>
                     <button onClick={()=>setShowAddReel(true)} style={{ padding:"8px 16px", borderRadius:8, border:`1px solid ${FRANZ}`, background:`${FRANZ}11`, color:FRANZ, fontSize:11, fontFamily:F_MONO, cursor:"pointer" }}>+ REEL</button>
-                    <button onClick={()=>setShowAddStory(true)} style={{ padding:"8px 16px", borderRadius:8, border:`1px solid ${TGC}`, background:`${TGC}11`, color:TGC, fontSize:11, fontFamily:F_MONO, cursor:"pointer" }}>+ STORY</button>
                   </div>}
-                  <CalendarGrid reels={reels} stories={stories} onDayClick={(day,year,month)=>setCalendarDay({day,year,month})}/>
+                  <CalendarGrid reels={reels} onDayClick={(day,year,month)=>setCalendarDay({day,year,month})}/>
                 </div>
               </div>
             )}
@@ -2198,70 +1859,6 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
               <ContentPlan reels={reels} brand={brand} m={m}
                 onOpenReel={(reel,b)=>setDetailReel({reel,brand:b})}
                 onAdd={()=>{ setNewReel(p=>({...p, brand:wBrand})); setShowAddReel(true); }}/>
-            )}
-
-            {/* STORIES */}
-            {tab==="stories" && (
-              <div>
-                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14, gap:8 }}>
-                  <div style={{ display:"flex", gap:6, flex:1 }}>
-                    <BrandToggle brand="franz" active={wBrand==="franz"} onClick={()=>setBrand("franz")} compact={m}/>
-                    <BrandToggle brand="tgc"   active={wBrand==="tgc"}   onClick={()=>setBrand("tgc")}   compact={m}/>
-                  </div>
-                  {!m && <button onClick={()=>setShowAddStory(true)} style={{ padding:"9px 18px", borderRadius:8, border:`1px solid ${bc(wBrand)}`, background:`${bc(wBrand)}11`, color:bc(wBrand), fontSize:12, fontFamily:F_MONO, letterSpacing:"1px", cursor:"pointer", whiteSpace:"nowrap" }}>+ STORY DAY</button>}
-                </div>
-                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  {stories.filter(s=>s.brand===wBrand).map(story=>{
-                    const color=bc(brand);
-                    const slots=[
-                      {key:"slot1",label:"Slot 1",value:story.slot1||story.morning},
-                      {key:"slot2",label:"Slot 2",value:story.slot2||story.midday},
-                      {key:"slot3",label:"Slot 3",value:story.slot3||story.evening},
-                      {key:"slot4",label:"Slot 4",value:story.slot4},
-                      {key:"slot5",label:"Slot 5",value:story.slot5},
-                      {key:"slot6",label:"Slot 6",value:story.slot6}];
-                    const doneCount=slots.filter(s=>story[`${s.key}_status`]==="posted").length;
-                    return (
-                      <div key={story.id} style={{ background:doneCount>0&&doneCount>=countFilledSlots(story)?`${color}08`:CARD, border:`1px solid ${doneCount>0?color+"44":BORDER}`, borderLeft:`4px solid ${doneCount>0&&doneCount>=countFilledSlots(story)?color:doneCount>0?color+"88":BORDER}`, borderRadius:10, padding:"10px 12px" }}>
-                        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-                          <div style={{ flexShrink:0 }}>
-                            <div style={{ fontSize:11, fontWeight:700, color:doneCount>0?color:TEXT }}>{formatDate(story.date)}</div>
-                            <div style={{ fontSize:9, color:MUTED, fontFamily:F_MONO }}>{new Date(story.date+"T00:00:00").toLocaleDateString("en-GB",{weekday:"short"}).toUpperCase()}</div>
-                          </div>
-                          <div style={{ flex:1 }}>
-                            <div style={{ display:"flex", gap:3 }}>{slots.map(s=><div key={s.key} style={{ width:8, height:8, borderRadius:"50%", background:story[`${s.key}_status`]==="posted"?color:BORDER }}/>)}</div>
-                            <div style={{ fontSize:10, color:MUTED, fontFamily:F_MONO, marginTop:2 }}>{doneCount}/6 posted</div>
-                          </div>
-                          <button onClick={()=>handleDeleteStory(story.id)} style={{ background:"none", border:"none", color:MUTED, cursor:"pointer", fontSize:11, padding:4 }}>✕</button>
-                        </div>
-                        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
-                          {slots.map(s=>{
-                            const done=story[`${s.key}_status`]==="posted";
-                            return (
-                              <div key={s.key}
-                                onClick={()=>{setEditSlot({id:story.id,slot:s.key});setEditVal(s.value);}}
-                                style={{ background:done?`${color}0F`:SOFT, border:`1px solid ${done?color+"55":BORDER}`, borderRadius:8, padding:"8px", cursor:"pointer" }}
-                                onMouseEnter={e=>e.currentTarget.style.borderColor=bc(brand)}
-                                onMouseLeave={e=>e.currentTarget.style.borderColor=done?bc(brand)+"55":BORDER}>
-                                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
-                                  <span style={{ fontSize:8, color:done?color:MUTED, fontFamily:F_MONO, fontWeight:700 }}>{s.label.toUpperCase()}</span>
-                                  <div onClick={e=>{e.stopPropagation();handleToggleStory(story.id,s.key,story[`${s.key}_status`]);}}
-                                    style={{ width:18, height:18, borderRadius:"50%", background:done?color:"transparent", border:`1.5px solid ${done?color:BORDER}`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, color:"#fff", cursor:"pointer" }}>
-                                    {done?"✓":""}
-                                  </div>
-                                </div>
-                                <div style={{ fontSize:m?10:11, color:TEXT, lineHeight:1.4 }}>{s.value}</div>
-                                <div style={{ marginTop:3, fontSize:8, color:done?color:MUTED, fontFamily:F_MONO }}>{done?"✓ posted":"tap to edit"}</div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {stories.filter(s=>s.brand===wBrand).length===0&&<div style={{ textAlign:"center", padding:60, color:MUTED, fontFamily:F_MONO }}>No stories yet.</div>}
-                </div>
-              </div>
             )}
 
             {/* SERIEN */}

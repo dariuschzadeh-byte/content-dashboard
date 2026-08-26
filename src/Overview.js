@@ -5,7 +5,7 @@
 // ══════════════════════════════════════════════════════════════
 import { useState } from "react";
 import {
-  CARD, BORDER, TEXT, MUTED, SOFT, GREEN, AMBER,
+  CARD, BORDER, TEXT, MUTED, SOFT, GREEN, AMBER, RED,
   LBL, aColor, bc, brandName, formatDate,
   STATUS_LABEL, STATUS_COLOR, MONTH_NAMES,
 } from "./theme";
@@ -156,6 +156,13 @@ function CreatorCard({ name, list, m, prefix, todayISO, daysInMonth, firstWeekda
     if (d) (byDay[d] = byDay[d] || []).push(r);
   });
 
+  // Everything still to post, earliest first — anything already past its date
+  // is overdue and stays at the top rather than being hidden.
+  const next = list
+    .filter(r => r.status !== "posted")
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
+    .slice(0, 3);
+
   return (
     <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, padding: m ? 16 : 20, minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
@@ -218,6 +225,39 @@ function CreatorCard({ name, list, m, prefix, todayISO, daysInMonth, firstWeekda
             <div style={{ fontSize: 10.5, color: MUTED, marginTop: 4 }}>{l}</div>
           </div>
         ))}
+      </div>
+
+      {/* Next up — the three reels this creator still has to get out, so they
+          can prepare instead of finding out on the posting day. */}
+      <div style={{ borderTop: `1px solid ${BORDER}`, marginTop: 14, paddingTop: 12 }}>
+        <div style={{ ...LBL, marginBottom: 8 }}>Next up</div>
+        {next.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: MUTED }}>All done for this month. 🎉</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {next.map(r => {
+              const overdue = r.date < todayISO;
+              return (
+                <div key={r.id} onClick={() => onOpenReel && onOpenReel(r, r.brand)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 9, padding: "8px 10px",
+                    background: SOFT, borderRadius: 9, cursor: "pointer", minWidth: 0,
+                    borderLeft: `3px solid ${overdue ? RED : r.status === "filmed" ? AMBER : accent}`,
+                  }}>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, color: overdue ? RED : TEXT, width: 44, flexShrink: 0 }}>
+                    {formatDate(r.date)}
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, color: TEXT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {r.title}
+                  </span>
+                  <span style={{ fontSize: 10.5, fontWeight: 700, color: overdue ? RED : STATUS_COLOR[r.status], flexShrink: 0 }}>
+                    {overdue ? "OVERDUE" : STATUS_LABEL[r.status].toUpperCase()}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
