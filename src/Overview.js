@@ -73,6 +73,33 @@ export default function Overview({ reels, brand, onOpenReel, m }) {
         <div style={{ height: 8, background: SOFT, borderRadius: 99, overflow: "hidden" }}>
           <div style={{ width: `${monthReels.length ? Math.round((totalPosted / monthReels.length) * 100) : 0}%`, height: "100%", background: GREEN, transition: "width .3s" }} />
         </div>
+
+        {/* Same number, split per creator — so everyone sees their own share of the month */}
+        {creators.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: m ? "1fr" : `repeat(${Math.min(creators.length, 3)}, 1fr)`, gap: m ? 10 : 18, borderTop: `1px solid ${BORDER}`, marginTop: 16, paddingTop: 14 }}>
+            {creators.map(name => {
+              const list = byCreator[name];
+              const done = list.filter(r => r.status === "posted").length;
+              const accent = name === "Unassigned" ? MUTED : aColor(name);
+              return (
+                <div key={name} style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 99, background: accent, flexShrink: 0 }} />
+                      <span style={{ fontSize: 13.5, fontWeight: 600, color: TEXT }}>{name}</span>
+                    </span>
+                    <span style={{ fontSize: 12.5, color: MUTED }}>
+                      <b style={{ color: TEXT }}>{done}</b> of {list.length} posted
+                    </span>
+                  </div>
+                  <div style={{ height: 5, background: SOFT, borderRadius: 99, overflow: "hidden" }}>
+                    <div style={{ width: `${list.length ? Math.round((done / list.length) * 100) : 0}%`, height: "100%", background: accent, transition: "width .3s" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Per creator */}

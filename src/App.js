@@ -332,6 +332,71 @@ function Modal({ title, onClose, onSave, saving, children, wide }) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// HEADER
+// Same layout as the Society dashboard: title top-left, account
+// top-right, brand pills below, tabs as an underlined row underneath.
+// ══════════════════════════════════════════════════════════════
+export function Header({ m, saving, todayLong, who, whoTitle, role, brand, setBrand, tab, setTab, tabs, onPassword, onSignOut }) {
+  const accent = brand === "all" ? TEXT : bc(brand);
+  const acct = {
+    marginLeft:8, fontSize:12, fontWeight:600, padding:"3px 10px", borderRadius:99,
+    border:`1px solid ${BORDER}`, background:CARD, color:TEXT, cursor:"pointer",
+  };
+  return (
+    <div style={{ maxWidth:1200, margin:"0 auto", padding:m?"max(14px, env(safe-area-inset-top)) 12px 0":"26px 28px 0" }}>
+
+      {/* Row 1 — who we are (left) · who you are (far right) */}
+      <div style={{ display:"flex", flexWrap:"wrap", alignItems:"flex-end", justifyContent:"space-between", gap:14, marginBottom:6 }}>
+        <div style={{ minWidth:0 }}>
+          <div style={LBL}>fr-anz · The Green Collective</div>
+          <h1 style={{ margin:"6px 0 0", fontSize:m?23:30, fontWeight:700, letterSpacing:"-0.02em", textTransform:"lowercase", fontFamily:F_DISPLAY, color:TEXT, display:"flex", alignItems:"center", gap:9 }}>
+            content dashboard
+            {saving && <span style={{ width:7, height:7, borderRadius:"50%", background:FRANZ, animation:"pulse 1s infinite" }}/>}
+          </h1>
+          <div style={{ fontSize:12.5, color:MUTED, marginTop:4 }}>{todayLong}</div>
+        </div>
+        {who && (
+          <div style={{ textAlign:"right", fontSize:12, color:MUTED, lineHeight:1.9 }}>
+            <span title={whoTitle}>{who} · {role==="admin" ? "Admin" : "Creator"}</span>
+            <button onClick={onPassword} style={{ ...acct, marginLeft:10 }}>Change password</button>
+            <button onClick={onSignOut} style={acct}>Sign out</button>
+          </div>
+        )}
+      </div>
+
+      {/* Row 2 — brand switch */}
+      <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", gap:10, margin:"18px 0 14px" }}>
+        {[["all","All brands"],["franz","fr-anz"],["tgc","The Green Collective"]].map(([id,label])=>{
+          const active = brand===id, c = id==="all" ? TEXT : bc(id);
+          return (
+            <button key={id} onClick={()=>setBrand(id)}
+              style={{ fontSize:13, fontWeight:600, padding:m?"7px 13px":"8px 16px", borderRadius:99, cursor:"pointer",
+                border:`1.5px solid ${active?c:BORDER}`, background:active?c:"transparent", color:active?"#fff":TEXT, transition:"all .2s" }}>
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Row 3 — tabs. On mobile the bottom nav does this job instead. */}
+      {!m && (
+        <div style={{ display:"flex", gap:0, borderBottom:`1px solid ${BORDER}`, flexWrap:"nowrap", overflowX:"auto", overflowY:"hidden", scrollbarWidth:"none" }}>
+          {tabs.map(([id,,label])=>(
+            <button key={id} onClick={()=>setTab(id)}
+              style={{ fontSize:14, fontWeight:600, padding:"10px 13px", border:"none", background:"transparent", cursor:"pointer",
+                color: tab===id ? TEXT : MUTED,
+                borderBottom: tab===id ? `2.5px solid ${accent}` : "2.5px solid transparent",
+                marginBottom:-1, whiteSpace:"nowrap", flexShrink:0 }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
 // HEUTE TAB
 // ══════════════════════════════════════════════════════════════
 function TodayTab({ reels, stories, series, onToggleStatus, onOpenReel, onEditStorySlot, onToggleStorySlot, saving }) {
@@ -1914,6 +1979,10 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
     return Math.round((done/s.parts)*100);
   };
 
+  const todayLong = new Date().toLocaleDateString("en-GB", {
+    weekday:"long", day:"numeric", month:"long", year:"numeric",
+  }) + " · Bali";
+
   const TABS = [
     ["overview",  "🏠", "Overview",     "Home"],
     ["plan",      "🎬", "Content plan", "Plan"],
@@ -2074,52 +2143,14 @@ function Dashboard({ user, role = "creator", profiles = {} }) {
         </Modal>
       )}
 
-      {/* ── Header ── */}
-      <div style={{ borderBottom:`1px solid ${BORDER}`, padding:m?"max(12px, env(safe-area-inset-top)) 12px 12px":"16px 28px", display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:50, background:BG }}>
-        <div style={{ display:"flex", alignItems:"center", gap:m?8:16 }}>
-          {saving && <div style={{ width:6, height:6, borderRadius:"50%", background:FRANZ, animation:"pulse 1s infinite" }}/>}
-          <div>
-            <div style={{ fontSize:m?17:21, fontWeight:600, color:TEXT, fontFamily:F_DISPLAY }}>Content Dashboard</div>
-            {!m && <div style={{ fontSize:10, color:MUTED, letterSpacing:"2px", textTransform:"uppercase", fontFamily:F_MONO }}>Franz & The Green Collective</div>}
-          </div>
-          {/* Global brand switch — one tool, both brands */}
-          <div style={{ display:"flex", gap:4, marginLeft:m?4:14, background:SOFT, padding:3, borderRadius:99 }}>
-            {[["all","All"],["franz","fr-anz"],["tgc","TGC"]].map(([id,label])=>(
-              <button key={id} onClick={()=>setBrand(id)}
-                style={{ display:"flex", alignItems:"center", gap:5, padding:m?"5px 9px":"6px 13px", borderRadius:99, border:"none", cursor:"pointer",
-                  background: brand===id ? (id==="all"?TEXT:bc(id)) : "transparent",
-                  color: brand===id ? "#fff" : MUTED, fontSize:m?11:12.5, fontWeight:600 }}>
-                {id!=="all" && <span style={{ width:7, height:7, borderRadius:99, background: brand===id ? "#fff" : bc(id) }}/>}
-                {label}
-              </button>
-            ))}
-          </div>
-          {user && (
-            <div style={{ display:"flex", alignItems:"center", gap:8, marginLeft:m?0:8 }}>
-              <span style={{ fontSize:m?9:11, color:MUTED, fontFamily:F_MONO, maxWidth:m?70:140, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={(profiles[user.id]?.name)||user.email}>
-                {role==="admin" ? "★ " : ""}{(profiles[user.id]?.name) || user.email}
-              </span>
-              <button onClick={()=>{setShowPwd(true);setPwdMsg(null);}} title="Change password" style={{ padding:"5px 10px", borderRadius:6, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:m?9:10, fontFamily:F_MONO, cursor:"pointer" }}>{m?"🔑":"PASSWORD"}</button>
-              <button onClick={()=>signOut()} title="Log out" style={{ padding:"5px 10px", borderRadius:6, border:`1px solid ${BORDER}`, background:"transparent", color:MUTED, fontSize:m?9:10, fontFamily:F_MONO, cursor:"pointer" }}>{m?"⎋":"LOGOUT"}</button>
-            </div>
-          )}
-        </div>
-        {!m ? (
-          <div style={{ display:"flex", gap:4, alignItems:"center" }}>
-            {TABS.map(([id,,label])=>(
-              <button key={id} onClick={()=>setTab(id)} style={{ padding:"8px 15px", borderRadius:8, border:`1px solid ${tab===id?TEXT:BORDER}`, cursor:"pointer", fontSize:12.5, fontFamily:F_BODY, fontWeight:600, background:tab===id?TEXT:"transparent", color:tab===id?BG:MUTED, transition:"all 0.15s" }}>{label}</button>
-            ))}
-          </div>
-        ):(
-          <div style={{ display:"flex", gap:6 }}>
-            <button onClick={()=>setShowAddReel(true)} style={{ padding:"7px 12px", borderRadius:8, border:`1px solid ${FRANZ}`, background:`${FRANZ}11`, color:FRANZ, fontSize:11, fontFamily:F_MONO, cursor:"pointer" }}>+ Reel</button>
-            <button onClick={()=>setShowAddStory(true)} style={{ padding:"7px 12px", borderRadius:8, border:`1px solid ${TGC}`, background:`${TGC}11`, color:TGC, fontSize:11, fontFamily:F_MONO, cursor:"pointer" }}>+ Story</button>
-          </div>
-        )}
-      </div>
+      <Header m={m} saving={saving} todayLong={todayLong}
+        who={user ? ((profiles[user.id]?.name) || user.email) : null}
+        whoTitle={user?.email} role={role}
+        brand={brand} setBrand={setBrand} tab={tab} setTab={setTab} tabs={TABS}
+        onPassword={()=>{setShowPwd(true);setPwdMsg(null);}} onSignOut={()=>signOut()}/>
 
       {/* ── Content ── */}
-      <div style={{ padding:m?"12px 10px":"24px 28px", maxWidth:1200, margin:"0 auto" }}>
+      <div style={{ padding:m?"14px 10px":"22px 28px", maxWidth:1200, margin:"0 auto" }}>
         {error && <ErrorBanner msg={error} onDismiss={()=>setError(null)}/>}
         {loading ? <Spinner/> : (
           <>

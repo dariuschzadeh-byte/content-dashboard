@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Content Dashboard — ink square, paper C. Flips in dark tab bars. -->
+  <style>
+    .bg { fill: #241C15 }
+    .fg { stroke: #FAF6EF }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #FAF6EF }
+      .fg { stroke: #241C15 }
+    }
+  </style>
+  <rect class="bg" width="512" height="512" rx="120"/>
+  <path class="fg" d="M374 203.1 A 129.3 129.3 0 1 0 374 308.9"
+        fill="none" stroke-width="69.1"/>
+</svg>

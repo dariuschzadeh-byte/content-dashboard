@@ -5,9 +5,15 @@ import App from './App';
 import reportWebVitals from './reportWebVitals';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
+// #design opens a demo harness for checking layout without a login.
+// Dev only — the branch (and the import) is dropped from the production build.
+let Root = App;
+if (process.env.NODE_ENV === 'development' && window.location.hash === '#design') {
+  Root = require('./DesignPreview').default;
+}
 root.render(
   <React.StrictMode>
-    <App />
+    <Root />
   </React.StrictMode>
 );
 

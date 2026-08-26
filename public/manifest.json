@@ -1,12 +1,17 @@
 {
-  "short_name": "Dashboard",
-  "name": "Content Dashboard — Franz & TGC",
-  "description": "Content Planning Dashboard für Franz & The Green Collective",
+  "short_name": "Content",
+  "name": "Content Dashboard — fr-anz & The Green Collective",
+  "description": "Content planning dashboard for fr-anz & The Green Collective",
   "icons": [
     {
       "src": "favicon.ico",
-      "sizes": "64x64 32x32 24x24 16x16",
+      "sizes": "256x256 128x128 64x64 48x48 32x32 24x24 16x16",
       "type": "image/x-icon"
+    },
+    {
+      "src": "favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
     },
     {
       "src": "logo192.png",
@@ -22,7 +27,7 @@
   "start_url": ".",
   "display": "standalone",
   "orientation": "portrait",
-  "theme_color": "#F5F0E8",
-  "background_color": "#F5F0E8",
+  "theme_color": "#FAF6EF",
+  "background_color": "#FAF6EF",
   "scope": "/"
 }
